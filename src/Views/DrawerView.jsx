@@ -27,6 +27,7 @@ const TAB_ITEMS = {
   ],
   settings: [
     { id: "backend", label: "Backend" },
+    { id: "defaults", label: "Defaults" },
     { id: "about", label: "About" },
   ],
 };

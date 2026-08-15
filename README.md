@@ -8,7 +8,7 @@ This is the plain JavaScript boilerplate for the extension. It sits between the 
 
 - **Goals**: persona-scoped collections and goal cards, currently backed by local extension storage until the Persona Helper backend commands are implemented.
 - **Actions**: a fast hint form with intention, approach, and notes fields. The initial scaffold prepares the UI and payload shape but does not call an LLM yet.
-- **Settings**: backend port and fallback options for the future command endpoint.
+- **Settings**: backend port `5003`, Marinara connection selection, and connection fallback for future generation flows.
 
 ## Source Layout
 
@@ -20,7 +20,7 @@ This is the plain JavaScript boilerplate for the extension. It sits between the 
 | `src/Views/ActionsView.jsx` | Action hint starter view |
 | `src/Views/SettingsView.jsx` | Backend and extension preferences |
 | `src/API/` | Backend, Marinara, settings, and local goal helpers |
-| `src/Components/` | Reusable controls and layout pieces |
+| `src/Components/` | Reusable controls, snackbar, modal, and layout pieces |
 | `src/Styles/` | Inline style constants plus injected drawer CSS |
 | `scripts/check-bundle-size.mjs` | Bundle text-entry limit guard |
 
@@ -65,7 +65,7 @@ Marinara currently allows a package zip up to 32 MB, individual text entries up 
 Current bundle size after the boilerplate pass is:
 
 ```text
-220673 bytes, 10.5% of 2097152
+225159 bytes, 10.7% of 2097152
 ```
 
 ## Installation

@@ -1,7 +1,7 @@
 import { loadPersonaHelperSettings } from "./settings.js";
 
 export function getBackendBaseUrl(settings = loadPersonaHelperSettings()) {
-  const port = String(settings.backendPort || "").trim() || "5004";
+  const port = String(settings.backendPort || "").trim() || "5003";
   return `http://localhost:${port}`;
 }
 

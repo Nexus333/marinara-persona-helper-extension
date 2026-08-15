@@ -2,6 +2,10 @@ export const NAV_SELECTOR = ".mari-topbar-panel-nav";
 export const NAV_CONTAINER_ID = "ph-nav-container";
 
 const drawerStyles = `
+  @keyframes ph-snackbar-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
   #${NAV_CONTAINER_ID} {
     display: inline-flex;
     align-items: center;
@@ -28,14 +32,14 @@ const drawerStyles = `
   .ph-drawer {
     position: fixed;
     top: 48px;
-    right: 0;
-    transform: translateX(100%);
+    left: 0;
+    transform: translateX(-100%);
     width: min(760px, 92vw);
     height: calc(100dvh - 48px);
     z-index: 9990;
     background: transparent;
-    border-left: 1px solid #333;
-    box-shadow: -4px 0 24px rgba(0,0,0,.4);
+    border-right: 1px solid #333;
+    box-shadow: 4px 0 24px rgba(0,0,0,.4);
     display: flex;
     flex-direction: column;
     font-family: Montserrat, sans-serif;

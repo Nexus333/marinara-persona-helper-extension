@@ -1,19 +1,18 @@
 {
-  "name": "persona-helper-extension",
+  "name": "marinara-persona-helper-extension",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "scripts": {
-    "build": "esbuild src/main.tsx --bundle --outfile=dist/hello-world.js --format=iife --platform=browser --jsx=automatic --minify",
-    "build:watch": "esbuild src/main.tsx --bundle --outfile=dist/hello-world.js --format=iife --platform=browser --jsx=automatic --watch",
-    "zip": "zip -j dist/hello-world.personal-extension.zip manifest.json dist/hello-world.js"
+    "build": "esbuild src/main.jsx --bundle --outfile=dist/persona-helper.js --format=iife --platform=browser --jsx=automatic --minify && pnpm size:check",
+    "build:watch": "esbuild src/main.jsx --bundle --outfile=dist/persona-helper.js --format=iife --platform=browser --jsx=automatic --watch",
+    "size:check": "node scripts/check-bundle-size.mjs dist/persona-helper.js",
+    "zip": "zip -j dist/persona-helper.personal-extension.zip manifest.json dist/persona-helper.js"
   },
   "devDependencies": {
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
     "esbuild": "^0.25.0",
     "lucide-react": "^0.513.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "typescript": "^5.0.0"
+    "react-dom": "^19.0.0"
   }
 }

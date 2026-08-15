@@ -3,15 +3,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-if [ ! -d node_modules ]; then
-  echo "Installing dependencies…"
-  pnpm install
-fi
+echo "Installing dependencies..."
+pnpm install --frozen-lockfile
 
-echo "Building…"
+echo "Building..."
 pnpm build
 
-echo "Packing…"
+echo "Packing..."
 pnpm zip
 
-echo "Done → dist/hello-world.personal-extension.zip"
+echo "Done -> dist/persona-helper.personal-extension.zip"

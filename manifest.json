@@ -1,8 +1,8 @@
 {
-  "name": "Hello World",
+  "name": "Persona Helper",
   "version": "1.0",
-  "description": "Boilerplate full_page_access extension — drawer UI, raw LLM call, message injection.",
+  "description": "Persona-scoped goals and action hints for playable story direction.",
   "runtime": "client",
-  "capabilities": ["full_page_access"],
-  "jsPath": "hello-world.js"
+  "capabilities": ["full_page_access", "read_active_persona"],
+  "jsPath": "persona-helper.js"
 }

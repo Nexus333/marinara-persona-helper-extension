@@ -1,22 +1,54 @@
-# Hello World — Marinara Engine Extension Boilerplate
+# Persona Helper
 
-A minimal `full_page_access` personal extension. Adds a nav bar icon that opens a drawer, runs an ad-hoc LLM prompt via the raw generation endpoint, and injects the result into the active chat as a narrator message.
+Persona Helper is a Marinara Engine personal extension for turning player intent into story-facing goals and action hints.
 
-Use this as a starting point for extensions that need direct API access.
+This is the plain JavaScript boilerplate for the extension. It sits between the small Hello World sample and the larger Story Manager structure: React for the extension shell, direct same-origin access through `full_page_access`, and separate folders for API helpers, reusable components, views, styles, and build scripts.
 
-## Stack
+## Current Shape
 
-- TypeScript + React 19 (own root, not the host app's tree)
-- Lucide icons via `lucide-react`
-- esbuild IIFE bundle
+- **Goals**: persona-scoped collections and goal cards, currently backed by local extension storage until the Persona Helper backend commands are implemented.
+- **Actions**: a fast hint form with intention, approach, and notes fields. The initial scaffold prepares the UI and payload shape but does not call an LLM yet.
+- **Settings**: backend port and fallback options for the future command endpoint.
+
+## Source Layout
+
+| Path | Role |
+| --- | --- |
+| `src/main.jsx` | Extension entry point |
+| `src/Views/DrawerView.jsx` | Drawer shell, rail navigation, top tabs |
+| `src/Views/GoalsView.jsx` | Goal collection and goal-card starter view |
+| `src/Views/ActionsView.jsx` | Action hint starter view |
+| `src/Views/SettingsView.jsx` | Backend and extension preferences |
+| `src/API/` | Backend, Marinara, settings, and local goal helpers |
+| `src/Components/` | Reusable controls and layout pieces |
+| `src/Styles/` | Inline style constants plus injected drawer CSS |
+| `scripts/check-bundle-size.mjs` | Bundle text-entry limit guard |
 
 ## Development
 
+Install dependencies:
+
 ```sh
-./build.sh
+pnpm install
 ```
 
-Installs deps on first run, then produces `dist/hello-world.personal-extension.zip`.
+Build:
+
+```sh
+pnpm build
+```
+
+Package:
+
+```sh
+pnpm zip
+```
+
+The package is written to:
+
+```text
+dist/persona-helper.personal-extension.zip
+```
 
 To iterate with live rebuilds:
 
@@ -24,61 +56,32 @@ To iterate with live rebuilds:
 pnpm build:watch
 ```
 
-Run `pnpm zip` manually after each build to repackage.
+Run `pnpm zip` manually after each build when you need a new importable package.
+
+## Build Size
+
+Marinara currently allows a package zip up to 32 MB, individual text entries up to 2 MB uncompressed, and total extracted text content up to 16 MB. The build script checks `dist/persona-helper.js` against the 2 MB text-entry limit.
+
+Current bundle size after the boilerplate pass is:
+
+```text
+219895 bytes, 10.5% of 2097152
+```
 
 ## Installation
 
-### 1. Enable external extensions in `.env`
+1. Set `ENABLE_EXTERNAL_EXTENSIONS=true` in Marinara Engine `.env`.
+2. Restart Marinara.
+3. In Marinara, enable **Settings -> Advanced -> Allow third-party extension imports**.
+4. Import `dist/persona-helper.personal-extension.zip` from **Addons -> External Extensions**.
+5. Enable Persona Helper and approve the exact hash.
 
+The zip is built with `zip -j`, so `persona-helper.js` and `manifest.json` live at the zip root. The manifest `jsPath` must remain:
+
+```json
+"jsPath": "persona-helper.js"
 ```
-ENABLE_EXTERNAL_EXTENSIONS=true
-```
 
-Restart the server after editing `.env`.
+## Security
 
-### 2. Enable the import gate in the UI
-
-Settings → Advanced → **Allow third-party extension imports**
-
-### 3. Import the extension
-
-Addons → External Extensions → **Import Extension** → select `dist/hello-world.personal-extension.zip`
-
-The zip is built with `zip -j` which strips directory paths, so the JS is stored as `hello-world.js` at the zip root. The manifest `jsPath` matches that flat name — do not change it to a subdirectory path or the import will silently skip the extension.
-
-### 4. Enable the extension
-
-Click the power button next to the imported extension.
-
-You will be prompted to acknowledge `full_page_access`. This removes the sandbox — the extension runs with the same privileges as browser console code on the Marinara origin.
-
-### 5. Use it
-
-Open a chat. A wand icon appears in the top nav bar. Click it to open the drawer, enter a prompt, and click **Run**. The LLM response is injected into the active chat as a narrator message.
-
-## How it works
-
-| File | Role |
-|---|---|
-| `src/main.tsx` | Entry point — mounts the React root, wires the run handler |
-| `src/drawer.tsx` | React component — nav button (portal), slide-out drawer UI |
-| `src/api.ts` | Fetch helpers — `/api/connections`, `/api/generate/raw`, `/api/chats/:id/messages` |
-| `src/invalidate.ts` | Cache invalidation — walks the React fiber tree to find the TanStack Query client and refetch messages |
-
-### CSRF
-
-All same-origin API calls include `x-marinara-csrf: 1`. This is required — requests without it are rejected.
-
-### Active chat ID
-
-Read from `localStorage` key `marinara-active-chat-id`.
-
-### Cache invalidation
-
-After injecting a message, `invalidate.ts` traverses the React fiber tree to locate the host app's TanStack Query client and calls `invalidateQueries` on the messages and messageCount keys. Falls back to firing `offline`/`online` window events (triggers `refetchOnReconnect`) if the fiber walk fails.
-
-## `full_page_access` trade-offs
-
-This capability bypasses the sandbox entirely. The extension can make arbitrary fetch calls, read the DOM, and access `localStorage`. Only use it for extensions you wrote yourself or have fully audited.
-
-The sandboxed runtime does not support direct API calls or message injection, which is why this boilerplate requires the elevated capability.
+This extension requests `full_page_access`, so it runs with the same practical authority as browser-console code on the Marinara origin. It can access DOM, local storage, and same-origin APIs. Only install builds you trust.

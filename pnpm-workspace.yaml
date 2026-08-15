@@ -1,0 +1,9 @@
+# Standalone extension install. Keep this file so `pnpm install` does not climb
+# to Marinara Engine's root workspace.
+packages:
+  - "."
+
+onlyBuiltDependencies:
+  - esbuild
+
+confirmModulesPurge: false

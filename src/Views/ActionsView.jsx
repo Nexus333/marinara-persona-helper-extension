@@ -1092,18 +1092,17 @@ export function ActionsView({ activeTab }) {
             </div>
             <pre style={viewStyles.rawOutput}>{rawViewerText}</pre>
             <div style={viewStyles.debugActionRow}>
-              <button
-                type="button"
-                style={{
-                  ...formStyles.primaryButton,
-                  ...(generating ? formStyles.disabledButton : undefined),
-                }}
-                onClick={() => void generateActionHints()}
-                disabled={generating}
-              >
-                <Lightbulb size="0.9375rem" />
-                {generating ? "Generating" : "Generate"}
-              </button>
+              {generating ? (
+                <div style={viewStyles.draftingIndicator} role="status" aria-live="polite">
+                  <LoaderCircle size="0.9375rem" style={viewStyles.draftingSpinner} />
+                  {renderDraftingStatus()}
+                </div>
+              ) : (
+                <button type="button" style={formStyles.primaryButton} onClick={() => void generateActionHints()}>
+                  <Lightbulb size="0.9375rem" />
+                  Generate
+                </button>
+              )}
             </div>
           </div>
         ) : null}
@@ -1554,30 +1553,28 @@ export function ActionsView({ activeTab }) {
               </>
             ) : null}
             <div style={formStyles.iconGroup}>
-              <button
-                type="button"
-                style={{
-                  ...formStyles.primaryButton,
-                  ...(generating ? formStyles.disabledButton : undefined),
-                }}
-                onClick={() => (editingHintId ? generatePlaceholderHints() : void generateActionHints())}
-                disabled={!editingHintId && generating}
-              >
-                {generating && !editingHintId ? (
-                  <LoaderCircle size="0.9375rem" style={viewStyles.draftingSpinner} />
-                ) : (
-                  <Lightbulb size="0.9375rem" />
-                )}
-                {editingHintId ? "Save Hint" : generating ? "Drafting" : "Draft Hints"}
-              </button>
-              {editingHintId ? (
-                <button type="button" style={formStyles.iconButton} title="Cancel edit" onClick={resetComposer}>
-                  <RotateCcw size="0.875rem" />
-                </button>
-              ) : null}
               {generating && !editingHintId ? (
-                renderDraftingStatus()
-              ) : null}
+                <div style={viewStyles.draftingIndicator} role="status" aria-live="polite">
+                  <LoaderCircle size="0.9375rem" style={viewStyles.draftingSpinner} />
+                  {renderDraftingStatus()}
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    style={formStyles.primaryButton}
+                    onClick={() => (editingHintId ? generatePlaceholderHints() : void generateActionHints())}
+                  >
+                    <Lightbulb size="0.9375rem" />
+                    {editingHintId ? "Save Hint" : "Draft Hints"}
+                  </button>
+                  {editingHintId ? (
+                    <button type="button" style={formStyles.iconButton} title="Cancel edit" onClick={resetComposer}>
+                      <RotateCcw size="0.875rem" />
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
           </>
         ) : null}

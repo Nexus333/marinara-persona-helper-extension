@@ -139,6 +139,13 @@ export const viewStyles = {
     gap: "0.375rem",
     flexShrink: 0,
   },
+  draftingIndicator: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4375rem",
+    minHeight: "2.25rem",
+    color: personaHelperTheme.colors.text,
+  },
   draftingStatus: {
     display: "inline-flex",
     alignItems: "center",

@@ -1,0 +1,19 @@
+{
+  "name": "persona-helper-extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.tsx --bundle --outfile=dist/hello-world.js --format=iife --platform=browser --jsx=automatic --minify",
+    "build:watch": "esbuild src/main.tsx --bundle --outfile=dist/hello-world.js --format=iife --platform=browser --jsx=automatic --watch",
+    "zip": "zip -j dist/hello-world.personal-extension.zip manifest.json dist/hello-world.js"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "lucide-react": "^0.513.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -22,8 +22,9 @@ const TAB_ITEMS = {
     { id: "focus", label: "Focus" },
   ],
   actions: [
-    { id: "hint", label: "Hint" },
-    { id: "history", label: "Recent" },
+    { id: "hints", label: "Hints" },
+    { id: "recent", label: "Recent" },
+    { id: "setup", label: "Setup" },
   ],
   settings: [
     { id: "backend", label: "Backend" },
@@ -34,7 +35,7 @@ const TAB_ITEMS = {
 
 const DEFAULT_TABS = {
   goals: "library",
-  actions: "hint",
+  actions: "hints",
   settings: "backend",
 };
 

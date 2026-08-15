@@ -5,6 +5,14 @@ export const DEFAULT_PERSONA_HELPER_SETTINGS = {
   backendPort: DEFAULT_BACKEND_PORT,
   allowConnectionFallback: true,
   preferredConnectionId: "",
+  chatHistoryLimit: "20",
+  generationMaxTokens: "1024",
+  generationTemperature: "",
+  generationTopP: "",
+  generationTopK: "",
+  generationFrequencyPenalty: "",
+  generationPresencePenalty: "",
+  recentHintLimit: "20",
 };
 
 function normalizePort(value) {
@@ -27,6 +35,14 @@ export function normalizePersonaHelperSettings(value) {
         : typeof value.allowLocalFallback === "boolean"
           ? value.allowLocalFallback
           : true,
+    chatHistoryLimit: typeof value.chatHistoryLimit === "string" ? value.chatHistoryLimit : "20",
+    generationMaxTokens: typeof value.generationMaxTokens === "string" ? value.generationMaxTokens : "1024",
+    generationTemperature: typeof value.generationTemperature === "string" ? value.generationTemperature : "",
+    generationTopP: typeof value.generationTopP === "string" ? value.generationTopP : "",
+    generationTopK: typeof value.generationTopK === "string" ? value.generationTopK : "",
+    generationFrequencyPenalty: typeof value.generationFrequencyPenalty === "string" ? value.generationFrequencyPenalty : "",
+    generationPresencePenalty: typeof value.generationPresencePenalty === "string" ? value.generationPresencePenalty : "",
+    recentHintLimit: typeof value.recentHintLimit === "string" ? value.recentHintLimit : "20",
   };
 }
 

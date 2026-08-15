@@ -82,7 +82,7 @@ export function DrawerView() {
             <p>Goals and next moves</p>
           </div>
           <button type="button" onClick={() => setOpen(false)} title="Close">
-            <X size={15} />
+            <X size="0.9375rem" />
           </button>
         </header>
         <div style={navigationStyles.shell}>
@@ -101,7 +101,7 @@ export function DrawerView() {
           </main>
         </div>
         <div className="ph-help-chip" title="Boilerplate scaffold">
-          <CircleHelp size={14} />
+          <CircleHelp size="0.875rem" />
           <span>Draft</span>
         </div>
       </aside>

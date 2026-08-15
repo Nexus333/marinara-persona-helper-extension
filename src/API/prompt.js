@@ -100,6 +100,56 @@ function normalizePrompt(prompt = {}) {
   };
 }
 
+function normalizeContractValidation(result = {}) {
+  return {
+    valid: result.valid === true,
+    missing_fields: toStringArray(result.missing_fields),
+    additional_required_fields: toStringArray(result.additional_required_fields),
+    additional_optional_fields: toStringArray(result.additional_optional_fields),
+    available_fields: toStringArray(result.available_fields),
+  };
+}
+
+function normalizeExecutionValue(value) {
+  return Array.isArray(value) ? toStringArray(value) : typeof value === "string" ? value : "";
+}
+
+function normalizeValueRecord(record = {}) {
+  return {
+    default: typeof record.default === "string" ? record.default : null,
+    resolved: normalizeExecutionValue(record.resolved),
+  };
+}
+
+function normalizeValueRecordMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry) => entry[1] && typeof entry[1] === "object" && !Array.isArray(entry[1]))
+      .map(([key, record]) => [key, normalizeValueRecord(record)]),
+  );
+}
+
+function normalizeExecutionEntry(entry = {}) {
+  return {
+    entry_id: typeof entry.entry_id === "string" ? entry.entry_id : "",
+    type: "section",
+    section_id: typeof entry.section_id === "string" ? entry.section_id : "",
+    ...(typeof entry.label === "string" ? { label: entry.label } : {}),
+    output: typeof entry.output === "string" ? entry.output : "",
+    inputs: normalizeValueRecordMap(entry.inputs),
+    parameters: normalizeValueRecordMap(entry.parameters),
+  };
+}
+
+function normalizeExecution(execution = {}) {
+  return {
+    text: typeof execution.text === "string" ? execution.text : "",
+    context: execution.context && typeof execution.context === "object" && !Array.isArray(execution.context) ? execution.context : {},
+    entries: Array.isArray(execution.entries) ? execution.entries.map(normalizeExecutionEntry) : [],
+  };
+}
+
 function cleanSearch(parameters = {}) {
   return {
     ...(parameters.query?.trim() ? { query: parameters.query.trim() } : {}),
@@ -119,8 +169,29 @@ export const promptApi = {
     return Array.isArray(data.items) ? data.items.map(normalizeSummary) : [];
   },
 
+  async fieldSearch(fields, parameters = {}) {
+    const data = await runPersonaCommand(PROMPT_DOMAIN, "field_search", {
+      fields: toStringArray(fields),
+      ...cleanSearch(parameters),
+    });
+    return Array.isArray(data.items) ? data.items.map(normalizeSummary) : [];
+  },
+
   async get(id) {
     return normalizePrompt(await runPersonaCommand(PROMPT_DOMAIN, "get", { id }));
+  },
+
+  async validateContract(id, requiredFields) {
+    return normalizeContractValidation(
+      await runPersonaCommand(PROMPT_DOMAIN, "validate_contract", {
+        id,
+        required_fields: toStringArray(requiredFields),
+      }),
+    );
+  },
+
+  async execute(request) {
+    return normalizeExecution(await runPersonaCommand(PROMPT_DOMAIN, "execute", request));
   },
 
   async listCategories() {

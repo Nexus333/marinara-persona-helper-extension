@@ -15,7 +15,7 @@ export function InfoModal({ title, children, onClose }) {
         <div style={overlayStyles.modalHeader}>
           <h3 style={overlayStyles.modalTitle}>{title}</h3>
           <button type="button" style={formStyles.iconButton} title="Close" aria-label="Close" onClick={onClose}>
-            <X size={15} />
+            <X size="0.9375rem" />
           </button>
         </div>
         {children}

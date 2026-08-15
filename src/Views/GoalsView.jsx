@@ -63,7 +63,7 @@ export function GoalsView({ activeTab }) {
                   refresh();
                 }}
               >
-                <Star size={15} fill={focused.priority ? "currentColor" : "none"} />
+                <Star size="0.9375rem" fill={focused.priority ? "currentColor" : "none"} />
               </button>
             </div>
             <p style={viewStyles.body}>{focused.intent}</p>
@@ -103,7 +103,7 @@ export function GoalsView({ activeTab }) {
                       refresh();
                     }}
                   >
-                    <Star size={15} fill={goal.priority ? "currentColor" : "none"} />
+                    <Star size="0.9375rem" fill={goal.priority ? "currentColor" : "none"} />
                   </button>
                   <button
                     type="button"
@@ -114,7 +114,7 @@ export function GoalsView({ activeTab }) {
                       refresh();
                     }}
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size="0.9375rem" />
                   </button>
                 </div>
               </div>
@@ -172,7 +172,7 @@ export function GoalsView({ activeTab }) {
           </Field>
         </div>
         <button type="button" style={formStyles.primaryButton} onClick={createGoal}>
-          <Plus size={15} />
+          <Plus size="0.9375rem" />
           Create Goal
         </button>
       </section>

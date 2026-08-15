@@ -27,7 +27,11 @@ function filterPrompts(prompts, localFilter, sort) {
   });
 }
 
-export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
+function fieldListLabel(fields) {
+  return fields.length ? fields.join(", ") : "";
+}
+
+export function PromptSelectModal({ selectedPromptId, onSelect, onClose, selecting = false, requiredFields = [] }) {
   const [query, setQuery] = useState("");
   const [localFilter, setLocalFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -39,6 +43,11 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const loadPrompts = (nextQuery = query, nextCategory = categoryFilter) =>
+    requiredFields.length
+      ? promptApi.fieldSearch(requiredFields, { query: nextQuery, content_type: nextCategory })
+      : promptApi.search({ query: nextQuery, content_type: nextCategory });
+
   useEffect(() => {
     let cancelled = false;
 
@@ -48,7 +57,7 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
       try {
         const [categoryItems, promptItems] = await Promise.all([
           promptApi.listCategories(),
-          promptApi.search({ query, content_type: categoryFilter }),
+          loadPrompts(query, categoryFilter),
         ]);
         if (cancelled) return;
         setCategories(categoryItems);
@@ -70,7 +79,7 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
     setLoading(true);
     setError("");
     try {
-      setPrompts(await promptApi.search({ query: nextQuery, content_type: nextCategory }));
+      setPrompts(await loadPrompts(nextQuery, nextCategory));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not search prompts.");
     } finally {
@@ -92,6 +101,7 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
 
   const libraryCards = useMemo(() => filterPrompts(prompts, localFilter, sort), [localFilter, prompts, sort]);
   const selectedCategory = categories.find((category) => category.id === selectedDetail?.content_type);
+  const requiredFieldLabel = fieldListLabel(requiredFields);
 
   return (
     <div style={promptPickerStyles.modalBackdrop} role="presentation" onMouseDown={onClose}>
@@ -105,31 +115,39 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
         <header style={promptPickerStyles.modalHeader}>
           <div style={viewStyles.pageHeader}>
             <h2 style={viewStyles.heading}>{selectedDetail ? selectedDetail.name : "Choose Prompt"}</h2>
-            <p style={viewStyles.muted}>Select the reusable prompt Persona Helper will use when drafting action hints.</p>
+            <p style={viewStyles.muted}>
+              {requiredFieldLabel
+                ? `Only prompts containing ${requiredFieldLabel} are shown.`
+                : "Select the reusable prompt Persona Helper will use when drafting action hints."}
+            </p>
           </div>
           <div style={promptPickerStyles.toolbar}>
             {selectedDetail ? (
               <>
                 <button type="button" style={formStyles.iconButton} title="Back" aria-label="Back" onClick={() => setSelectedDetail(null)}>
-                  <ArrowLeft size={15} />
+                  <ArrowLeft size="0.9375rem" />
                 </button>
                 <button
                   type="button"
-                  style={formStyles.primaryButton}
+                  style={{
+                    ...formStyles.primaryButton,
+                    ...(selecting ? formStyles.disabledButton : undefined),
+                  }}
                   onClick={() => onSelect(selectedDetail)}
                   title="Select prompt"
+                  disabled={selecting}
                 >
-                  <Check size={15} />
-                  Select
+                  <Check size="0.9375rem" />
+                  {selecting ? "Validating" : "Select"}
                 </button>
               </>
             ) : (
               <button type="button" style={formStyles.iconButton} title="Refresh" aria-label="Refresh" onClick={() => runSearch()}>
-                <RefreshCw size={15} />
+                <RefreshCw size="0.9375rem" />
               </button>
             )}
             <button type="button" style={formStyles.iconButton} title="Close" aria-label="Close" onClick={onClose}>
-              <X size={15} />
+              <X size="0.9375rem" />
             </button>
           </div>
         </header>
@@ -137,13 +155,13 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
         {selectedDetail ? (
           <section style={promptPickerStyles.detailPanel}>
             <div style={promptPickerStyles.detailGrid}>
-              <div style={promptPickerStyles.detailBlock}>
+              <div style={{ ...promptPickerStyles.detailBlock, ...promptPickerStyles.detailScrollBlock }}>
                 <p style={viewStyles.kicker}>Details</p>
                 <p style={viewStyles.body}>{selectedDetail.description || "No description."}</p>
                 <p style={viewStyles.muted}>{selectedCategory?.name || selectedDetail.content_type || "Unsorted"}</p>
                 <p style={viewStyles.muted}>{tagsLabel(selectedDetail.tags)}</p>
               </div>
-              <div style={promptPickerStyles.detailBlock}>
+              <div style={{ ...promptPickerStyles.detailBlock, ...promptPickerStyles.detailScrollBlock }}>
                 <p style={viewStyles.kicker}>Inputs</p>
                 {selectedDetail.requirements.length ? (
                   selectedDetail.requirements.map((requirement) => (
@@ -250,7 +268,7 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
                     }}
                   >
                     <div style={promptPickerStyles.cardHeader}>
-                      <ScrollText size={16} />
+                      <ScrollText size="1rem" />
                       <span style={promptPickerStyles.cardTitle}>{prompt.name}</span>
                     </div>
                     <div style={promptPickerStyles.cardDescription}>{prompt.description || "No description."}</div>
@@ -260,7 +278,13 @@ export function PromptSelectModal({ selectedPromptId, onSelect, onClose }) {
                     </div>
                   </div>
                 ))}
-                {!libraryCards.length ? <div style={viewStyles.empty}>No prompts found.</div> : null}
+                {!libraryCards.length ? (
+                  <div style={viewStyles.empty}>
+                    {requiredFieldLabel
+                      ? `No prompts found with the required fields: ${requiredFieldLabel}.`
+                      : "No prompts found."}
+                  </div>
+                ) : null}
               </div>
             )}
             {detailLoading ? <div style={viewStyles.empty}>Loading prompt details.</div> : null}

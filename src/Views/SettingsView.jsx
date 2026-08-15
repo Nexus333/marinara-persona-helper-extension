@@ -55,7 +55,7 @@ export function SettingsView({ activeTab }) {
             This scaffold is local-first. Backend command integration and `@goal(...)` preprocessing are future steps.
           </p>
           <button type="button" style={formStyles.primaryButton} onClick={() => setAboutOpen(true)}>
-            <CircleHelp size={15} />
+            <CircleHelp size="0.9375rem" />
             View Boundaries
           </button>
         </article>
@@ -129,7 +129,7 @@ export function SettingsView({ activeTab }) {
           </>
         )}
         <button type="button" style={formStyles.primaryButton} onClick={save}>
-          <Save size={15} />
+          <Save size="0.9375rem" />
           Save Settings
         </button>
       </section>

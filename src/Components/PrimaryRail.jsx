@@ -27,7 +27,7 @@ export function PrimaryRail({ activeId, items, onSelect }) {
             onMouseLeave={() => setHoveredId(null)}
           >
             {active && <span style={navigationStyles.railActiveIndicator} />}
-            <Icon size={16} />
+            <Icon size="1rem" />
             {hovered && <span style={navigationStyles.railTooltip}>{item.label}</span>}
           </button>
         );

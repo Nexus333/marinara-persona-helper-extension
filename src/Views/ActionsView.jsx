@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Clipboard, Edit3, Lightbulb, PlusCircle, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Clipboard, Edit3, Lightbulb, PlusCircle, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { Field } from "../Components/Field.jsx";
+import { PromptSelectModal } from "../Components/PromptSelectModal.jsx";
 import { StatusSnackbar } from "../Components/StatusSnackbar.jsx";
 import { formStyles } from "../Styles/formStyles.js";
+import { promptPickerStyles } from "../Styles/promptPickerStyles.js";
 import { viewStyles } from "../Styles/viewStyles.js";
 
 const ACTIVE_HINTS_KEY = "persona-helper-active-action-hints";
 const RECENT_HINTS_KEY = "persona-helper-recent-action-hints";
+const ACTION_PROMPT_KEY = "persona-helper-action-prompt";
 const RECENT_LIMIT = 20;
 
 const EMPTY_DRAFT = {
@@ -37,6 +40,23 @@ function writeStoredHints(key, hints) {
   window.localStorage.setItem(key, JSON.stringify(hints));
 }
 
+function readStoredPrompt() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ACTION_PROMPT_KEY) || "null");
+    return parsed && typeof parsed === "object" && typeof parsed.id === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPrompt(prompt) {
+  if (!prompt) {
+    window.localStorage.removeItem(ACTION_PROMPT_KEY);
+    return;
+  }
+  window.localStorage.setItem(ACTION_PROMPT_KEY, JSON.stringify(prompt));
+}
+
 function formatTimestamp(value) {
   if (!value) return "Draft";
   try {
@@ -56,6 +76,8 @@ export function ActionsView({ activeTab }) {
   const [composerOpen, setComposerOpen] = useState(true);
   const [activeHints, setActiveHints] = useState(() => readStoredHints(ACTIVE_HINTS_KEY));
   const [recentHints, setRecentHints] = useState(() => readStoredHints(RECENT_HINTS_KEY));
+  const [selectedPrompt, setSelectedPrompt] = useState(() => readStoredPrompt());
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [editingHintId, setEditingHintId] = useState(null);
   const [message, setMessage] = useState("");
 
@@ -66,6 +88,10 @@ export function ActionsView({ activeTab }) {
   useEffect(() => {
     writeStoredHints(RECENT_HINTS_KEY, recentHints.slice(0, RECENT_LIMIT));
   }, [recentHints]);
+
+  useEffect(() => {
+    writeStoredPrompt(selectedPrompt);
+  }, [selectedPrompt]);
 
   const composerLabel = useMemo(() => {
     if (editingHintId) return "Edit Hint";
@@ -166,6 +192,12 @@ export function ActionsView({ activeTab }) {
     showMessage("Hint moved to active.");
   }
 
+  function selectActionPrompt(prompt) {
+    setSelectedPrompt(prompt);
+    setPromptModalOpen(false);
+    showMessage("Action prompt selected.");
+  }
+
   function renderHintCard(hint, mode) {
     const isRecent = mode === "recent";
     return (
@@ -230,9 +262,54 @@ export function ActionsView({ activeTab }) {
       <div style={viewStyles.stack}>
         <header style={viewStyles.pageHeader}>
           <h2 style={viewStyles.heading}>Setup</h2>
-          <p style={viewStyles.muted}>Action prompt setup will land after the backend and extractor API shape is pulled in.</p>
+          <p style={viewStyles.muted}>Choose the reusable prompt Persona Helper will use to draft action hints.</p>
         </header>
-        <div style={viewStyles.empty}>Setup is reserved for the action generation pipeline.</div>
+        {selectedPrompt ? (
+          <section style={promptPickerStyles.selectedCard}>
+            <div style={viewStyles.stack}>
+              <div style={viewStyles.cardMeta}>
+                <p style={viewStyles.kicker}>Selected Prompt</p>
+                <p style={viewStyles.muted}>{selectedPrompt.content_type || "unsorted"}</p>
+              </div>
+              <div style={viewStyles.panelHeader}>
+                <ScrollText size={16} />
+                <h3 style={viewStyles.title}>{selectedPrompt.name}</h3>
+              </div>
+              <p style={viewStyles.body}>{selectedPrompt.description || "No description."}</p>
+              <p style={viewStyles.muted}>
+                {selectedPrompt.entries?.length || 0} section{selectedPrompt.entries?.length === 1 ? "" : "s"} |{" "}
+                {selectedPrompt.requirements?.length || 0} requirement{selectedPrompt.requirements?.length === 1 ? "" : "s"}
+              </p>
+            </div>
+            <div style={viewStyles.cardToolbar}>
+              <button type="button" style={formStyles.primaryButton} onClick={() => setPromptModalOpen(true)}>
+                Choose
+              </button>
+              <button type="button" style={formStyles.iconButton} title="Clear prompt" onClick={() => setSelectedPrompt(null)}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section style={viewStyles.panel}>
+            <div style={viewStyles.pageHeader}>
+              <h3 style={viewStyles.title}>No action prompt selected</h3>
+              <p style={viewStyles.muted}>Hints can use placeholder drafting now, but API generation needs a selected prompt first.</p>
+            </div>
+            <button type="button" style={formStyles.primaryButton} onClick={() => setPromptModalOpen(true)}>
+              <ScrollText size={15} />
+              Choose Prompt
+            </button>
+          </section>
+        )}
+        {promptModalOpen ? (
+          <PromptSelectModal
+            selectedPromptId={selectedPrompt?.id}
+            onSelect={selectActionPrompt}
+            onClose={() => setPromptModalOpen(false)}
+          />
+        ) : null}
+        <StatusSnackbar message={message} />
       </div>
     );
   }

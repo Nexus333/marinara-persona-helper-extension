@@ -65,7 +65,7 @@ Marinara currently allows a package zip up to 32 MB, individual text entries up 
 Current bundle size after the boilerplate pass is:
 
 ```text
-219895 bytes, 10.5% of 2097152
+220673 bytes, 10.5% of 2097152
 ```
 
 ## Installation

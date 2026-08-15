@@ -15,15 +15,15 @@ const drawerStyles = `
     border: none;
     border-radius: 8px;
     background: transparent;
-    color: var(--primary, #ffb3d9);
+    color: #CCC;
     cursor: pointer;
     flex-shrink: 0;
   }
   #${NAV_CONTAINER_ID} button:hover,
   #${NAV_CONTAINER_ID} button.ph-active {
-    background: color-mix(in srgb, var(--primary, #ffb3d9) 14%, transparent);
-    color: var(--primary, #ffb3d9);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary, #ffb3d9) 28%, transparent);
+    background: #333;
+    color: #CCC;
+    box-shadow: inset 0 0 0 1px #CCC;
   }
   .ph-drawer {
     position: fixed;
@@ -33,14 +33,14 @@ const drawerStyles = `
     width: min(760px, 92vw);
     height: calc(100dvh - 48px);
     z-index: 9990;
-    background: oklch(18% 0.032 315);
-    border-left: 1px solid color-mix(in srgb, var(--primary, #ffb3d9) 26%, transparent);
-    box-shadow: -8px 0 28px rgba(3, 1, 10, 0.48);
+    background: transparent;
+    border-left: 1px solid #333;
+    box-shadow: -4px 0 24px rgba(0,0,0,.4);
     display: flex;
     flex-direction: column;
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-family: Montserrat, sans-serif;
     font-size: 13px;
-    color: oklch(91% 0.018 312);
+    color: #CCC;
     transition: transform 0.2s cubic-bezier(.22, 1, .36, 1);
   }
   .ph-drawer.ph-open {
@@ -51,21 +51,23 @@ const drawerStyles = `
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    border-bottom: 1px solid color-mix(in srgb, var(--primary, #ffb3d9) 18%, transparent);
-    background: oklch(13% 0.026 315);
+    border-bottom: 1px solid #333;
+    background: #000;
     flex-shrink: 0;
   }
   .ph-drawer-header h1 {
     margin: 0;
     font-size: 17px;
     line-height: 1.25;
-    font-weight: 700;
+    font-family: Nova Flat, sans-serif;
+    font-weight: 400;
     letter-spacing: 0;
   }
   .ph-drawer-header p {
     margin: 2px 0 0;
     font-size: 12px;
-    color: oklch(76% 0.04 315);
+    color: #888;
+    font-family: Iceberg, sans-serif;
   }
   .ph-drawer-header button {
     display: inline-flex;
@@ -75,13 +77,14 @@ const drawerStyles = `
     height: 30px;
     background: transparent;
     border: 1px solid transparent;
-    color: oklch(80% 0.035 315);
+    color: #888;
     cursor: pointer;
     border-radius: 6px;
   }
   .ph-drawer-header button:hover {
-    background: oklch(23% 0.036 315);
-    border-color: color-mix(in srgb, var(--primary, #ffb3d9) 22%, transparent);
+    background: #333;
+    border-color: #333;
+    color: #CCC;
   }
   .ph-help-chip {
     position: absolute;
@@ -92,10 +95,11 @@ const drawerStyles = `
     gap: 6px;
     padding: 6px 8px;
     border-radius: 999px;
-    background: oklch(24% 0.034 315);
-    color: oklch(82% 0.04 315);
-    border: 1px solid color-mix(in srgb, var(--primary, #ffb3d9) 20%, transparent);
+    background: #111;
+    color: #888;
+    border: 1px solid #333;
     font-size: 12px;
+    font-family: Iceberg, sans-serif;
     pointer-events: none;
   }
   @media (max-width: 720px) {

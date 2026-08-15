@@ -1,11 +1,14 @@
+import { personaHelperTheme } from "./theme.js";
+
 const controlBase = {
   width: "100%",
   boxSizing: "border-box",
-  border: "1px solid color-mix(in srgb, var(--primary, #ffb3d9) 20%, transparent)",
+  border: `1px solid ${personaHelperTheme.colors.charcoal}`,
   borderRadius: 8,
-  background: "oklch(14% 0.025 315)",
-  color: "oklch(92% 0.018 315)",
-  font: "inherit",
+  background: personaHelperTheme.colors.nearBlack,
+  color: personaHelperTheme.colors.text,
+  fontFamily: personaHelperTheme.fontFamily.body,
+  fontSize: 13,
   outline: "none",
 };
 
@@ -17,12 +20,14 @@ export const formStyles = {
     minWidth: 0,
   },
   label: {
-    color: "oklch(84% 0.035 315)",
+    color: personaHelperTheme.colors.text,
+    fontFamily: personaHelperTheme.fontFamily.ui,
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 400,
   },
   hint: {
-    color: "oklch(68% 0.03 315)",
+    color: personaHelperTheme.colors.muted,
+    fontFamily: personaHelperTheme.fontFamily.body,
     fontSize: 12,
   },
   input: {
@@ -56,13 +61,14 @@ export const formStyles = {
     gap: 7,
     minHeight: 36,
     padding: "8px 12px",
-    border: "1px solid color-mix(in srgb, var(--primary, #ffb3d9) 22%, transparent)",
+    border: `1px solid ${personaHelperTheme.colors.charcoal}`,
     borderRadius: 8,
-    background: "var(--primary, #ffb3d9)",
-    color: "oklch(15% 0.025 315)",
+    background: personaHelperTheme.colors.text,
+    color: personaHelperTheme.colors.black,
     cursor: "pointer",
     fontSize: 13,
-    fontWeight: 750,
+    fontFamily: personaHelperTheme.fontFamily.ui,
+    fontWeight: 600,
   },
   iconGroup: {
     display: "inline-flex",
@@ -72,10 +78,10 @@ export const formStyles = {
   iconButton: {
     width: 30,
     height: 30,
-    border: "1px solid color-mix(in srgb, var(--primary, #ffb3d9) 16%, transparent)",
+    border: `1px solid ${personaHelperTheme.colors.charcoal}`,
     borderRadius: 7,
-    background: "oklch(18% 0.03 315)",
-    color: "oklch(82% 0.04 315)",
+    background: personaHelperTheme.colors.black,
+    color: personaHelperTheme.colors.muted,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -85,7 +91,8 @@ export const formStyles = {
     display: "flex",
     alignItems: "center",
     gap: 9,
-    color: "oklch(86% 0.026 315)",
+    color: personaHelperTheme.colors.text,
     fontSize: 13,
+    fontFamily: personaHelperTheme.fontFamily.body,
   },
 };

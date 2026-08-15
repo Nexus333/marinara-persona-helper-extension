@@ -14,9 +14,15 @@ export async function runPersonaCommand(domain, command, parameters = {}) {
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(data?.error || `Persona Helper command failed: ${domain}.${command}`);
+    throw new Error(data?.message || data?.error || `Persona Helper command failed: ${domain}.${command}`);
   }
-  return data;
+  if (data && typeof data === "object" && "success" in data) {
+    if (!data.success) {
+      throw new Error(data.message || `Persona Helper command failed: ${domain}.${command}`);
+    }
+    return data.data ?? {};
+  }
+  return data ?? {};
 }
 
 export const goalCommands = {

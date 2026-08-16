@@ -37,8 +37,49 @@ function normalizeListResponse(data) {
   return [];
 }
 
+function getCardDataName(data) {
+  try {
+    const parsed = typeof data === "string" ? JSON.parse(data) : data;
+    if (parsed && typeof parsed === "object" && typeof parsed.name === "string" && parsed.name.trim()) {
+      return parsed.name.trim();
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
 function getDisplayName(item, fallback) {
-  return String(item?.name || item?.displayName || item?.title || item?.id || fallback).trim();
+  return String(
+    getCardDataName(item?.data) ||
+    item?.name ||
+    item?.displayName ||
+    item?.display_name ||
+    item?.title ||
+    item?.character?.name ||
+    item?.id ||
+    fallback,
+  ).trim();
+}
+
+function getAvatarUrl(item) {
+  return String(
+    item?.avatarUrl ||
+    item?.avatar_url ||
+    item?.avatarPath ||
+    item?.avatar_path ||
+    item?.thumbnailUrl ||
+    item?.thumbnail_url ||
+    item?.raw?.avatarUrl ||
+    item?.raw?.avatar_url ||
+    item?.raw?.avatarPath ||
+    item?.raw?.avatar_path ||
+    "",
+  ).trim();
+}
+
+function getAvatarCrop(item) {
+  return item?.avatarCrop || item?.avatar_crop || item?.raw?.avatarCrop || item?.raw?.avatar_crop || null;
 }
 
 export async function getPersonas() {
@@ -52,6 +93,8 @@ export async function getPersonas() {
       mode: "persona",
       key: String(persona?.id || persona?.name || "").trim(),
       label: getDisplayName(persona, "Persona"),
+      avatarUrl: getAvatarUrl(persona),
+      avatarCrop: getAvatarCrop(persona),
       source: "marinara",
       raw: persona,
     }))
@@ -69,9 +112,63 @@ export async function getCharacters() {
       mode: "character",
       key: String(character?.id || character?.name || "").trim(),
       label: getDisplayName(character, "Character"),
+      avatarUrl: getAvatarUrl(character),
+      avatarCrop: getAvatarCrop(character),
       source: "marinara",
       raw: character,
     }))
+    .filter((subject) => subject.key);
+}
+
+export async function getCharacterSummaries(ids = []) {
+  const uniqueIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!uniqueIds.length) return [];
+
+  const res = await fetch("/api/characters/summaries", {
+    method: "POST",
+    headers: CSRF_HEADERS,
+    body: JSON.stringify({ ids: uniqueIds }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || data?.message || "Could not load character summaries");
+  return normalizeListResponse(data)
+    .map((character) => ({
+      mode: "character",
+      key: String(character?.id || character?.characterId || character?.character_id || "").trim(),
+      label: getDisplayName(character, "Character"),
+      avatarUrl: getAvatarUrl(character),
+      avatarCrop: getAvatarCrop(character),
+      source: "marinara",
+      current: true,
+      raw: character,
+    }))
+    .filter((subject) => subject.key);
+}
+
+export async function getCharacterDetails(ids = []) {
+  const uniqueIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+  const results = await Promise.allSettled(
+    uniqueIds.map(async (id) => {
+      const res = await fetch(`/api/characters/${encodeURIComponent(id)}`, {
+        headers: { "x-marinara-csrf": "1" },
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || data?.message || `Could not load character ${id}`);
+      return {
+        mode: "character",
+        key: String(data?.id || id).trim(),
+        label: getDisplayName(data, id),
+        avatarUrl: getAvatarUrl(data),
+        avatarCrop: getAvatarCrop(data),
+        source: "marinara",
+        current: true,
+        raw: data,
+      };
+    }),
+  );
+  return results
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value)
     .filter((subject) => subject.key);
 }
 

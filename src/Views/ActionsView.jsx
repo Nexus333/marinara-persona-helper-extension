@@ -3,6 +3,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  CircleHelp,
   Clipboard,
   Edit3,
   Lightbulb,
@@ -1217,6 +1218,10 @@ export function ActionsView({ activeTab }) {
     );
   }
 
+  if (activeTab === "about") {
+    return <ActionsAboutView />;
+  }
+
   if (activeTab === "setup") {
     return (
       <div style={viewStyles.stack}>
@@ -1611,6 +1616,62 @@ export function ActionsView({ activeTab }) {
         />
       ) : null}
       <StatusSnackbar message={message} />
+    </div>
+  );
+}
+
+function ActionsAboutView() {
+  return (
+    <div style={viewStyles.stack}>
+      <header style={viewStyles.pageHeader}>
+        <h2 style={viewStyles.heading}>About Actions</h2>
+        <p style={viewStyles.muted}>Action hints turn intention into playable next moves.</p>
+      </header>
+
+      <section style={viewStyles.panel}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>What It Surfaces</h3>
+            <p style={viewStyles.muted}>Small options the player can act on now, without committing them as canon or long-term structure.</p>
+          </div>
+          <span style={viewStyles.badge}>
+            <Lightbulb size="0.875rem" />
+          </span>
+        </div>
+        <div style={viewStyles.list}>
+          <p style={viewStyles.body}>Use Actions when the player has intent but wants help choosing a concrete move.</p>
+          <p style={viewStyles.body}>Hints should preserve agency. They suggest angles, risks, openings, and tactics, then get used, edited, or discarded.</p>
+        </div>
+      </section>
+
+      <section style={viewStyles.grid}>
+        <article style={viewStyles.panel}>
+          <div style={viewStyles.panelHeader}>
+            <h3 style={viewStyles.title}>Core Flow</h3>
+            <span style={viewStyles.badge}>
+              <Clipboard size="0.875rem" />
+            </span>
+          </div>
+          <div style={viewStyles.list}>
+            <p style={viewStyles.body}>Describe the intention and approach.</p>
+            <p style={viewStyles.body}>Attach optional context from lorebooks or notes.</p>
+            <p style={viewStyles.body}>Draft hints, review them, then keep only the ones worth using.</p>
+          </div>
+        </article>
+
+        <article style={viewStyles.panel}>
+          <div style={viewStyles.panelHeader}>
+            <h3 style={viewStyles.title}>Boundaries</h3>
+            <span style={viewStyles.badge}>
+              <CircleHelp size="0.875rem" />
+            </span>
+          </div>
+          <div style={viewStyles.list}>
+            <p style={viewStyles.body}>Actions are not the goal tracker, scene log, or campaign planner.</p>
+            <p style={viewStyles.body}>Recent is a lightweight backlog. Setup owns prompt selection and debug visibility.</p>
+          </div>
+        </article>
+      </section>
     </div>
   );
 }

@@ -18,14 +18,16 @@ const RAIL_ITEMS = [
 
 const TAB_ITEMS = {
   goals: [
-    { id: "tasks", label: "Tasks" },
+    { id: "tasks", label: "Milestones" },
     { id: "library", label: "Library" },
     { id: "setup", label: "Setup" },
+    { id: "about", label: "About" },
   ],
   actions: [
     { id: "hints", label: "Hints" },
     { id: "recent", label: "Recent" },
     { id: "setup", label: "Setup" },
+    { id: "about", label: "About" },
   ],
   settings: [
     { id: "backend", label: "Backend" },

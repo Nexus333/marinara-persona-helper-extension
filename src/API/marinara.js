@@ -11,6 +11,9 @@ export async function getPersonaContext() {
   if (!globalThis.marinara?.context?.get) {
     return {
       chatId: getActiveChatId(),
+      characterId: null,
+      characterIds: [],
+      characters: [],
       personaId: null,
       persona: null,
     };
@@ -19,9 +22,57 @@ export async function getPersonaContext() {
   const context = await marinara.context.get();
   return {
     chatId: context?.chatId ?? getActiveChatId(),
+    characterId: context?.characterId ?? null,
+    characterIds: Array.isArray(context?.characterIds) ? context.characterIds : [],
+    characters: Array.isArray(context?.characters) ? context.characters : [],
     personaId: context?.personaId ?? null,
     persona: context?.persona ?? null,
   };
+}
+
+function normalizeListResponse(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+
+function getDisplayName(item, fallback) {
+  return String(item?.name || item?.displayName || item?.title || item?.id || fallback).trim();
+}
+
+export async function getPersonas() {
+  const res = await fetch("/api/characters/personas/list", {
+    headers: { "x-marinara-csrf": "1" },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || data?.message || "Could not load personas");
+  return normalizeListResponse(data)
+    .map((persona) => ({
+      mode: "persona",
+      key: String(persona?.id || persona?.name || "").trim(),
+      label: getDisplayName(persona, "Persona"),
+      source: "marinara",
+      raw: persona,
+    }))
+    .filter((subject) => subject.key);
+}
+
+export async function getCharacters() {
+  const res = await fetch("/api/characters", {
+    headers: { "x-marinara-csrf": "1" },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || data?.message || "Could not load characters");
+  return normalizeListResponse(data)
+    .map((character) => ({
+      mode: "character",
+      key: String(character?.id || character?.name || "").trim(),
+      label: getDisplayName(character, "Character"),
+      source: "marinara",
+      raw: character,
+    }))
+    .filter((subject) => subject.key);
 }
 
 export async function getConnections() {

@@ -18,8 +18,9 @@ const RAIL_ITEMS = [
 
 const TAB_ITEMS = {
   goals: [
+    { id: "tasks", label: "Tasks" },
     { id: "library", label: "Library" },
-    { id: "focus", label: "Focus" },
+    { id: "setup", label: "Setup" },
   ],
   actions: [
     { id: "hints", label: "Hints" },
@@ -34,7 +35,7 @@ const TAB_ITEMS = {
 };
 
 const DEFAULT_TABS = {
-  goals: "library",
+  goals: "tasks",
   actions: "hints",
   settings: "backend",
 };
@@ -91,7 +92,7 @@ export function DrawerView() {
             <TopTabs activeId={activeTab} tabs={TAB_ITEMS[activeView]} onSelect={setActiveTab} />
             <section style={navigationStyles.content}>
               {activeView === "goals" ? (
-                <GoalsView activeTab={activeTabs.goals} />
+                <GoalsView activeTab={activeTabs.goals} onSelectTab={setActiveTab} />
               ) : activeView === "actions" ? (
                 <ActionsView activeTab={activeTabs.actions} />
               ) : (

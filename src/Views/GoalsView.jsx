@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  Copy,
   Database,
   EyeOff,
   FolderCog,
@@ -36,6 +37,7 @@ import {
 } from "lucide-react";
 import { getBackendBaseUrl, getGoalSchema, goalCommands } from "../API/personaBackend.js";
 import { getCharacterDetails, getCharacterSummaries, getCharacters, getPersonaContext, getPersonas } from "../API/marinara.js";
+import { StatusSnackbar } from "../Components/StatusSnackbar.jsx";
 import { formStyles } from "../Styles/formStyles.js";
 import { viewStyles } from "../Styles/viewStyles.js";
 
@@ -658,6 +660,7 @@ export function GoalsView({ activeTab, onSelectTab }) {
           activeSubject={activeSubject}
           backendReady={backendStatus.ok}
           chatId={context.chatId}
+          subjectOptions={subjectState.options}
         />
       )}
     </div>
@@ -747,12 +750,6 @@ function GoalsAboutView() {
 }
 
 function SubjectSwitcher({ activeSubject, context, onSelect, setSubjectState, subjectState }) {
-  const query = subjectState.query.trim().toLowerCase();
-  const visibleSubjects = subjectState.options.filter((subject) => {
-    if (!query) return true;
-    return `${subject.label} ${subject.key} ${subject.mode}`.toLowerCase().includes(query);
-  });
-
   return (
     <section style={viewStyles.panel}>
       <button
@@ -768,41 +765,74 @@ function SubjectSwitcher({ activeSubject, context, onSelect, setSubjectState, su
         <span style={viewStyles.muted}>{context.chatId ? "Current chat" : "No chat"}</span>
       </button>
       {subjectState.expanded ? (
-        <div style={viewStyles.stack}>
-          <input
-            style={formStyles.input}
-            value={subjectState.query}
-            onChange={(event) => setSubjectState((current) => ({ ...current, query: event.target.value }))}
-            placeholder="Search personas, characters, extras"
-          />
-          {subjectState.error ? <p style={viewStyles.note}>{subjectState.error}</p> : null}
-          <div style={viewStyles.scrollStack}>
-            {visibleSubjects.map((subject) => {
-              const selected = subject.key === activeSubject?.key;
-              return (
-                <button
-                  key={`${subject.mode}:${subject.key}`}
-                  type="button"
-                  style={{
-                    ...viewStyles.subjectOption,
-                    ...(selected ? viewStyles.subjectOptionSelected : null),
-                  }}
-                  onClick={() => onSelect(subject)}
-                >
-                  <SubjectIcon subject={subject} />
-                  <span style={viewStyles.subjectText}>
-                    <span style={viewStyles.contextText}>{subject.label}</span>
-                    <span style={viewStyles.contextLabel}>{subject.mode} / {subject.source}</span>
-                  </span>
-                  {selected ? <CheckCircle2 size="0.875rem" /> : null}
-                </button>
-              );
-            })}
-            {!visibleSubjects.length ? <div style={viewStyles.empty}>No matching subjects.</div> : null}
-          </div>
-        </div>
+        <SubjectPickerDialog
+          activeKey={activeSubject?.key || ""}
+          error={subjectState.error}
+          onClose={() => setSubjectState((current) => ({ ...current, expanded: false, query: "" }))}
+          onQueryChange={(query) => setSubjectState((current) => ({ ...current, query }))}
+          onSelect={onSelect}
+          query={subjectState.query}
+          subjects={subjectState.options}
+          title="Choose Subject"
+        />
       ) : null}
     </section>
+  );
+}
+
+function SubjectPickerDialog({ activeKey, error, onClose, onQueryChange, onSelect, query, subjects, title }) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const visibleSubjects = subjects.filter((subject) => {
+    if (!normalizedQuery) return true;
+    return `${subject.label} ${subject.key} ${subject.mode} ${subject.source}`.toLowerCase().includes(normalizedQuery);
+  });
+
+  return (
+    <div style={viewStyles.modalBackdrop}>
+      <section style={viewStyles.modalPanel}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>{title}</h3>
+            <p style={viewStyles.muted}>{subjects.length} available subject{subjects.length === 1 ? "" : "s"}</p>
+          </div>
+          <button type="button" style={formStyles.iconButton} title="Close subject picker" onClick={onClose}>
+            <X size="0.875rem" />
+          </button>
+        </div>
+        <input
+          autoFocus
+          style={formStyles.input}
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Search personas, characters, extras"
+        />
+        {error ? <p style={viewStyles.note}>{error}</p> : null}
+        <div style={viewStyles.subjectCardGrid}>
+          {visibleSubjects.map((subject) => {
+            const selected = subject.key === activeKey;
+            return (
+              <button
+                key={`${subject.mode}:${subject.key}`}
+                type="button"
+                style={{
+                  ...viewStyles.subjectOption,
+                  ...(selected ? viewStyles.subjectOptionSelected : null),
+                }}
+                onClick={() => onSelect(subject)}
+              >
+                <SubjectIcon subject={subject} />
+                <span style={viewStyles.subjectText}>
+                  <span style={viewStyles.contextText}>{subject.label}</span>
+                  <span style={viewStyles.contextLabel}>{subject.mode} / {subject.source}</span>
+                </span>
+                {selected ? <CheckCircle2 size="0.875rem" /> : null}
+              </button>
+            );
+          })}
+          {!visibleSubjects.length ? <div style={viewStyles.empty}>No matching subjects.</div> : null}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1040,7 +1070,7 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
             )}
           </>
         ) : null}
-        {status.error ? <p style={viewStyles.note}>{status.error}</p> : null}
+        <StatusSnackbar message={status.error} />
       </section>
 
       {!backendReady ? <div style={viewStyles.empty}>Goal backend is unavailable.</div> : null}
@@ -1287,18 +1317,13 @@ function LiveTaskCard({ goal, node, onSetCurrentFocus, onUpdateNode }) {
           {isAccumulation ? (
             <span style={viewStyles.progressPill}>{progress} / {target}</span>
           ) : (
-            <button
-              aria-pressed={checked}
-              aria-label={checked ? "Mark milestone open" : "Mark milestone complete"}
-              type="button"
-              style={{
-                ...viewStyles.taskCheckButton,
-                ...(checked ? viewStyles.taskCheckButtonActive : null),
-              }}
-              onClick={() => onUpdateNode(goal, node, { state: checked ? "open" : "done" })}
-            >
-              {checked ? <CheckCircle2 size="1rem" /> : null}
-            </button>
+            <span style={viewStyles.taskCompletionSwitch}>
+              <SwitchField
+                checked={checked}
+                label="Complete"
+                onChange={(nextChecked) => onUpdateNode(goal, node, { state: nextChecked ? "done" : "open" })}
+              />
+            </span>
           )}
           <span style={viewStyles.subjectText}>
             <span style={viewStyles.contextText}>{getNodeText(node) || "Untitled milestone"}</span>
@@ -1832,16 +1857,16 @@ function SetupView({ activeSubject, backendStatus, context, contextStatus, subje
         </div>
       </section>
 
-      {status.error ? <p style={viewStyles.note}>{status.error}</p> : null}
-      {status.message ? <p style={viewStyles.note}>{status.message}</p> : null}
+      <StatusSnackbar message={status.error || status.message} />
     </div>
   );
 }
 
-function LibraryView({ activeSubject, backendReady, chatId }) {
+function LibraryView({ activeSubject, backendReady, chatId, subjectOptions = [] }) {
   const persona = activeSubject?.key || "";
   const [collections, setCollections] = useState([]);
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
+  const [selectedGoalId, setSelectedGoalId] = useState("");
   const [goals, setGoals] = useState([]);
   const [chatBinding, setChatBinding] = useState(null);
   const [includeSuspended, setIncludeSuspended] = useState(true);
@@ -1852,6 +1877,10 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
   const [collectionQuery, setCollectionQuery] = useState("");
   const [collectionDraft, setCollectionDraft] = useState({ mode: "idle", id: "", name: "", description: "", tags: "" });
   const [goalDraft, setGoalDraft] = useState(null);
+  const [duplicateDraft, setDuplicateDraft] = useState(null);
+  const [duplicateCollections, setDuplicateCollections] = useState([]);
+  const [duplicateBinding, setDuplicateBinding] = useState(null);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [assignmentQuery, setAssignmentQuery] = useState("");
   const [assignmentResults, setAssignmentResults] = useState([]);
@@ -1868,6 +1897,7 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
       setCollections([]);
       setGoals([]);
       setChatBinding(null);
+      setSelectedGoalId("");
       return;
     }
 
@@ -1888,6 +1918,7 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
       setCollections(nextCollections);
       setSelectedCollectionId(nextSelectedId);
       setGoals(Array.isArray(goalResult.items) ? goalResult.items : []);
+      setSelectedGoalId((current) => (Array.isArray(goalResult.items) && goalResult.items.some((goal) => goal.id === current) ? current : ""));
       setChatBinding(bindingResult ? { ...bindingResult, targets: bindingResult.targets || [] } : null);
       if (!libraryQuery.trim()) {
         setLibraryResults([
@@ -1905,7 +1936,9 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
     setCollections([]);
     setGoals([]);
     setSelectedCollectionId("");
+    setSelectedGoalId("");
     setGoalDraft(null);
+    setDuplicateDraft(null);
     setLibraryResults([]);
     setCollectionDraft({ mode: "idle", id: "", name: "", description: "", tags: "" });
     loadLibrary("");
@@ -1914,9 +1947,43 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
 
   async function selectCollection(collectionId) {
     setSelectedCollectionId(collectionId);
+    setSelectedGoalId("");
     setGoalDraft(null);
     await loadLibrary(collectionId);
   }
+
+  useEffect(() => {
+    if (!duplicateDraft?.targetPersona) {
+      setDuplicateCollections([]);
+      setDuplicateBinding(null);
+      return;
+    }
+
+    let active = true;
+    const targetPersona = duplicateDraft.targetPersona;
+    setDuplicateLoading(true);
+    Promise.all([
+      targetPersona === persona ? Promise.resolve({ items: collections }) : goalCommands.listCollections({ persona: targetPersona }),
+      chatId ? goalCommands.getChat({ persona: targetPersona, chat_id: chatId }).catch(() => null) : Promise.resolve(null),
+    ])
+      .then(([collectionResult, bindingResult]) => {
+        if (!active) return;
+        setDuplicateCollections(Array.isArray(collectionResult.items) ? collectionResult.items : []);
+        setDuplicateBinding(bindingResult ? { ...bindingResult, targets: bindingResult.targets || [] } : null);
+        setDuplicateLoading(false);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setDuplicateCollections([]);
+        setDuplicateBinding(null);
+        setDuplicateLoading(false);
+        setStatus({ loading: false, error: error?.message || "Could not load duplicate target collections.", message: "" });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [chatId, collections, duplicateDraft?.targetPersona, persona]);
 
   async function saveCollection() {
     const name = collectionDraft.name.trim();
@@ -1965,11 +2032,15 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
   }
 
   async function ensureCollection(collectionId) {
+    return ensureCollectionForPersona(persona, collectionId, collections);
+  }
+
+  async function ensureCollectionForPersona(targetPersona, collectionId, availableCollections = []) {
     if (collectionId) return collectionId;
-    const existing = collections.find((collection) => collection.name?.toLowerCase() === "unsorted");
+    const existing = availableCollections.find((collection) => collection.name?.toLowerCase() === "unsorted");
     if (existing) return existing.id;
     const result = await goalCommands.createCollection({
-      persona,
+      persona: targetPersona,
       name: "Unsorted",
       description: "Default collection for goals that are not filed elsewhere.",
       tags: [],
@@ -2043,6 +2114,59 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
       initialNodes: [],
       assignAfterSave: false,
     });
+  }
+
+  function startGoalDuplicate(goal) {
+    const targetPersona = activeSubject?.key || persona;
+    setDuplicateDraft({
+      goal,
+      name: `${goal.name || "Goal"} copy`,
+      targetPersona,
+      collectionId: "",
+      resetProgress: true,
+      assignAfterSave: false,
+    });
+  }
+
+  async function duplicateGoal() {
+    if (!duplicateDraft?.goal?.id || !persona || !duplicateDraft.targetPersona) return;
+    const targetPersona = duplicateDraft.targetPersona;
+    setStatus({ loading: true, error: "", message: "" });
+    try {
+      const collectionId = await ensureCollectionForPersona(targetPersona, duplicateDraft.collectionId, duplicateCollections);
+      const created = await goalCommands.duplicate({
+        persona,
+        id: duplicateDraft.goal.id,
+        collection_id: collectionId,
+        target_persona: targetPersona !== persona ? targetPersona : undefined,
+        reset_progress: duplicateDraft.resetProgress,
+        name: duplicateDraft.name.trim() || undefined,
+      });
+
+      const targetBinding = duplicateBinding || null;
+      const targetBoundTargets = targetBinding?.targets || [];
+      const targetCollectionBound = isTargetBound(targetBoundTargets, { type: "collection", id: collectionId });
+      const targetGoalBound = isTargetBound(targetBoundTargets, { type: "goal", id: created.id });
+
+      if (duplicateDraft.assignAfterSave && chatId && !targetCollectionBound && !targetGoalBound) {
+        const nextBinding = await goalCommands.updateChat({
+          persona: targetPersona,
+          chat_id: chatId,
+          targets: toUpdateTargets([...targetBoundTargets, { type: "goal", id: created.id }]),
+        });
+        if (targetPersona === persona) setChatBinding({ ...nextBinding, targets: nextBinding.targets || [] });
+        setDuplicateBinding({ ...nextBinding, targets: nextBinding.targets || [] });
+      }
+
+      setDuplicateDraft(null);
+      if (targetPersona === persona) {
+        await loadLibrary(collectionId);
+        setSelectedGoalId(created.id);
+      }
+      setStatus({ loading: false, error: "", message: targetPersona === persona ? "Goal duplicated." : "Goal duplicated to target subject." });
+    } catch (error) {
+      setStatus({ loading: false, error: error?.message || "Could not duplicate goal.", message: "" });
+    }
   }
 
   async function updateGoalMetadata(goal, patch) {
@@ -2422,14 +2546,13 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
                       <Search size="0.875rem" />
                       Assign from search
                     </button>
-                    <label style={formStyles.toggleRow}>
-                      <input
+                    <span style={viewStyles.librarySwitch}>
+                      <SwitchField
                         checked={includeSuspended}
-                        onChange={(event) => setIncludeSuspended(event.target.checked)}
-                        type="checkbox"
+                        label="Show suspended"
+                        onChange={setIncludeSuspended}
                       />
-                      Show suspended
-                    </label>
+                    </span>
                   </div>
                 </div>
 
@@ -2447,10 +2570,13 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
                           boundTargets={boundTargets}
                           collectionBound={collectionBound}
                           goal={goal}
+                          isSelected={goal.id === selectedGoalId}
                           key={goal.id}
                           onBind={() => bindTarget({ type: "goal", id: goal.id })}
                           onDelete={() => deleteGoal(goal)}
+                          onDuplicate={() => startGoalDuplicate(goal)}
                           onEdit={() => startGoalEdit(goal)}
+                          onSelect={() => setSelectedGoalId(goal.id)}
                           onTogglePriority={() => updateGoalMetadata(goal, { priority: !goal.priority })}
                           onToggleStatus={() => updateGoalMetadata(goal, { status: goal.status === "suspended" ? "active" : "suspended" })}
                         />
@@ -2482,44 +2608,233 @@ function LibraryView({ activeSubject, backendReady, chatId }) {
         />
       ) : null}
 
-      {status.error ? <p style={viewStyles.note}>{status.error}</p> : null}
-      {status.message ? <p style={viewStyles.note}>{status.message}</p> : null}
+      {duplicateDraft ? (
+        <GoalDuplicateDialog
+          activeSubject={activeSubject}
+          binding={duplicateBinding}
+          chatId={chatId}
+          collections={duplicateCollections}
+          draft={duplicateDraft}
+          loading={duplicateLoading}
+          onCancel={() => setDuplicateDraft(null)}
+          onChange={setDuplicateDraft}
+          onDuplicate={duplicateGoal}
+          subjectOptions={subjectOptions}
+        />
+      ) : null}
+
+      <StatusSnackbar message={status.error || status.message} />
     </div>
   );
 }
 
-function GoalLibraryRow({ boundTargets, collectionBound, goal, onBind, onDelete, onEdit, onTogglePriority, onToggleStatus }) {
+function GoalLibraryRow({
+  boundTargets,
+  collectionBound,
+  goal,
+  isSelected,
+  onBind,
+  onDelete,
+  onDuplicate,
+  onEdit,
+  onSelect,
+  onTogglePriority,
+  onToggleStatus,
+}) {
   const goalBound = isTargetBound(boundTargets, { type: "goal", id: goal.id });
   return (
-    <article style={viewStyles.targetRow}>
-      <span style={{ ...viewStyles.badge, ...(goal.priority ? null : viewStyles.badgeMuted) }}>
-        {goal.priority ? <Star size="0.75rem" /> : null}
-        {goal.type}
-      </span>
-      <span style={viewStyles.subjectText}>
-        <span style={viewStyles.contextText}>{goal.name}</span>
-        <span style={viewStyles.contextLabel}>
-          {goal.status}{goal.type === "achievement" && goal.narrative_state ? ` / ${goal.narrative_state}` : ""}
+    <article
+      style={{
+        ...viewStyles.goalLibraryCard,
+        ...(isSelected ? viewStyles.goalLibraryCardSelected : null),
+      }}
+    >
+      <button type="button" style={viewStyles.goalLibrarySelectButton} onClick={onSelect}>
+        <span style={{ ...viewStyles.badge, ...(goal.priority ? null : viewStyles.badgeMuted) }}>
+          {goal.priority ? <Star size="0.75rem" /> : null}
+          {goal.type}
         </span>
-      </span>
-      <span style={viewStyles.cardToolbar}>
-        <button type="button" style={formStyles.iconButton} title="Edit goal" onClick={onEdit}>
-          <Pencil size="0.8125rem" />
-        </button>
-        <button type="button" style={formStyles.iconButton} title="Toggle priority" onClick={onTogglePriority}>
-          <Star size="0.8125rem" />
-        </button>
-        <button type="button" style={formStyles.iconButton} title="Suspend or resume" onClick={onToggleStatus}>
-          {goal.status === "suspended" ? <RefreshCw size="0.8125rem" /> : <EyeOff size="0.8125rem" />}
-        </button>
-        <button type="button" style={formStyles.iconButton} title="Assign goal" onClick={onBind} disabled={goalBound || collectionBound}>
-          {goalBound || collectionBound ? <CheckCircle2 size="0.8125rem" /> : <Target size="0.8125rem" />}
-        </button>
-        <button type="button" style={formStyles.iconButton} title="Delete goal" onClick={onDelete}>
-          <Trash2 size="0.8125rem" />
-        </button>
-      </span>
+        <span style={viewStyles.subjectText}>
+          <span style={viewStyles.contextText}>{goal.name}</span>
+          <span style={viewStyles.goalDescription}>{goal.description || "No description"}</span>
+          <span style={viewStyles.contextLabel}>
+            {goal.status}{goal.type === "achievement" && goal.narrative_state ? ` / ${goal.narrative_state}` : ""}
+            {goalBound || collectionBound ? " / assigned to chat" : ""}
+          </span>
+        </span>
+        <ChevronRight size="0.875rem" />
+      </button>
+      {isSelected ? (
+        <div style={viewStyles.goalCardActions}>
+          <button type="button" style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }} title="Edit goal" onClick={onEdit}>
+            <Pencil size="0.8125rem" />
+            Edit
+          </button>
+          <button type="button" style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }} title="Duplicate goal" onClick={onDuplicate}>
+            <Copy size="0.8125rem" />
+            Duplicate
+          </button>
+          <button type="button" style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }} title="Toggle priority" onClick={onTogglePriority}>
+            <Star size="0.8125rem" />
+            {goal.priority ? "Unmark priority" : "Priority"}
+          </button>
+          <button type="button" style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }} title="Suspend or resume" onClick={onToggleStatus}>
+            {goal.status === "suspended" ? <RefreshCw size="0.8125rem" /> : <EyeOff size="0.8125rem" />}
+            {goal.status === "suspended" ? "Resume" : "Suspend"}
+          </button>
+          <button
+            type="button"
+            style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }}
+            title="Assign goal"
+            onClick={onBind}
+            disabled={goalBound || collectionBound}
+          >
+            {goalBound || collectionBound ? <CheckCircle2 size="0.8125rem" /> : <Target size="0.8125rem" />}
+            {goalBound || collectionBound ? "Assigned" : "Assign"}
+          </button>
+          <button type="button" style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }} title="Delete goal" onClick={onDelete}>
+            <Trash2 size="0.8125rem" />
+            Delete
+          </button>
+        </div>
+      ) : null}
     </article>
+  );
+}
+
+function GoalDuplicateDialog({
+  activeSubject,
+  binding,
+  chatId,
+  collections,
+  draft,
+  loading,
+  onCancel,
+  onChange,
+  onDuplicate,
+  subjectOptions,
+}) {
+  const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
+  const [subjectQuery, setSubjectQuery] = useState("");
+  const targetSubject = subjectOptions.find((subject) => subject.key === draft.targetPersona) || null;
+  const collectionBound = draft.collectionId
+    ? isTargetBound(binding?.targets || [], { type: "collection", id: draft.collectionId })
+    : (collections || []).some((collection) => (
+        collection.name?.toLowerCase() === "unsorted" &&
+        isTargetBound(binding?.targets || [], { type: "collection", id: collection.id })
+      ));
+
+  return (
+    <div style={viewStyles.modalBackdrop}>
+      <section style={viewStyles.modalPanel}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>Duplicate Goal</h3>
+            <p style={viewStyles.muted}>{draft.goal?.name || "Selected goal"}</p>
+          </div>
+          <button type="button" style={formStyles.iconButton} title="Close duplicate goal" onClick={onCancel}>
+            <X size="0.875rem" />
+          </button>
+        </div>
+
+        <label style={formStyles.field}>
+          <span style={formStyles.label}>Name</span>
+          <input
+            style={formStyles.input}
+            value={draft.name}
+            onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Duplicate goal name"
+          />
+        </label>
+
+        <div style={viewStyles.fieldGrid}>
+          <div style={formStyles.field}>
+            <span style={formStyles.label}>Target subject</span>
+            <div style={viewStyles.subjectSelectCard}>
+              <SubjectIcon subject={targetSubject || activeSubject} />
+              <span style={viewStyles.subjectText}>
+                <span style={viewStyles.contextText}>{targetSubject?.label || activeSubject?.label || draft.targetPersona}</span>
+                <span style={viewStyles.contextLabel}>{targetSubject?.mode || activeSubject?.mode || "subject"}</span>
+              </span>
+              <button type="button" style={{ ...formStyles.secondaryButton, ...formStyles.compactButton }} onClick={() => setSubjectPickerOpen(true)}>
+                Change
+              </button>
+            </div>
+          </div>
+          <label style={formStyles.field}>
+            <span style={formStyles.label}>Target collection</span>
+            <select
+              disabled={loading}
+              style={formStyles.input}
+              value={draft.collectionId}
+              onChange={(event) => onChange((current) => ({ ...current, collectionId: event.target.value }))}
+            >
+              <option value="">Unsorted</option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.id}>{collection.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div style={viewStyles.stack}>
+          <SwitchField
+            checked={draft.resetProgress}
+            label="Reset progress"
+            onChange={(checked) => onChange((current) => ({ ...current, resetProgress: checked }))}
+          />
+          {chatId ? (
+            <SwitchField
+              checked={draft.assignAfterSave}
+              label="Assign to current chat after save"
+              onChange={(checked) => onChange((current) => ({ ...current, assignAfterSave: checked }))}
+            />
+          ) : null}
+        </div>
+
+        <div style={viewStyles.badgeRow}>
+          <span style={viewStyles.badge}>
+            <SubjectIcon subject={targetSubject || activeSubject} />
+            {targetSubject?.label || activeSubject?.label || draft.targetPersona}
+          </span>
+          <span style={{ ...viewStyles.badge, ...(collectionBound ? null : viewStyles.badgeMuted) }}>
+            {collectionBound ? "Target collection already assigned" : "Target collection not assigned"}
+          </span>
+        </div>
+        {collectionBound ? (
+          <p style={viewStyles.note}>The target collection is already assigned to this chat, so the duplicate does not need a separate goal binding.</p>
+        ) : null}
+
+        <div style={viewStyles.debugActionRow}>
+          <button type="button" style={formStyles.secondaryButton} onClick={onCancel}>
+            <X size="0.875rem" />
+            Cancel
+          </button>
+          <button type="button" style={formStyles.primaryButton} onClick={onDuplicate} disabled={loading || !draft.targetPersona}>
+            <Copy size="0.875rem" />
+            Duplicate
+          </button>
+        </div>
+        {subjectPickerOpen ? (
+          <SubjectPickerDialog
+            activeKey={draft.targetPersona}
+            onClose={() => {
+              setSubjectPickerOpen(false);
+              setSubjectQuery("");
+            }}
+            onQueryChange={setSubjectQuery}
+            onSelect={(subject) => {
+              onChange((current) => ({ ...current, targetPersona: subject.key, collectionId: "" }));
+              setSubjectPickerOpen(false);
+              setSubjectQuery("");
+            }}
+            query={subjectQuery}
+            subjects={subjectOptions}
+            title="Choose Target Subject"
+          />
+        ) : null}
+      </section>
+    </div>
   );
 }
 

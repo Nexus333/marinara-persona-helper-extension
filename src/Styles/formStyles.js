@@ -86,6 +86,11 @@ export const formStyles = {
     fontFamily: personaHelperTheme.fontFamily.ui,
     fontWeight: 600,
   },
+  compactButton: {
+    minHeight: "1.875rem",
+    padding: "0.375rem 0.5rem",
+    fontSize: "0.71875rem",
+  },
   disabledButton: {
     opacity: 0.55,
     cursor: "not-allowed",

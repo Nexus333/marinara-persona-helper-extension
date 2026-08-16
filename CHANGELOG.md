@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Replaced Goals subject dropdown/list selection with searchable card picker modals for current subject and duplicate target subject.
+- Replaced remaining Goals checkbox affordances with switches, tightened selected-card action buttons, and routed Goals status messages through the shared snackbar.
+- Added Goals Library duplication with target subject, target collection, reset progress, and optional current-chat assignment.
+- Expanded Goals Library cards to show descriptions and reveal actions only on the selected card.
 - Moved the Goals Library create/edit form above the collection goal list.
 - Defaulted Goals Chat Scope and Library search rail to collapsed.
 - Added Actions and Goals About tabs describing intended use cases and surfaced player context.

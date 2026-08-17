@@ -488,6 +488,15 @@ export const viewStyles = {
     gap: "0.5rem",
     alignItems: "center",
   },
+  focusedNodeText: {
+    margin: 0,
+    color: personaHelperTheme.colors.text,
+    fontFamily: personaHelperTheme.fontFamily.body,
+    fontSize: "0.8125rem",
+    lineHeight: 1.45,
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+  },
   taskLinkRow: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) auto",

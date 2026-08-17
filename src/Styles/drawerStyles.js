@@ -23,15 +23,15 @@ const drawerStyles = `
     border: none;
     border-radius: 0.5rem;
     background: transparent;
-    color: #CCC;
+    color: var(--primary, #CCC);
     cursor: pointer;
     flex-shrink: 0;
   }
   #${NAV_CONTAINER_ID} button:hover,
   #${NAV_CONTAINER_ID} button.ph-active {
     background: #333;
-    color: #CCC;
-    box-shadow: inset 0 0 0 0.0625rem #CCC;
+    color: var(--primary, #CCC);
+    box-shadow: inset 0 0 0 0.0625rem var(--primary, #CCC);
   }
   .ph-drawer {
     position: fixed;

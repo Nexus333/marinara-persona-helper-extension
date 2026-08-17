@@ -2,13 +2,43 @@
 
 Persona Helper is a Marinara Engine personal extension for turning player intent into story-facing goals and action hints.
 
-This is the plain JavaScript boilerplate for the extension. It sits between the small Hello World sample and the larger Story Manager structure: React for the extension shell, direct same-origin access through `full_page_access`, and separate folders for API helpers, reusable components, views, styles, and build scripts.
+It uses a React drawer shell with same-origin access through `full_page_access`, Marinara APIs for chat, character, lorebook, prompt, and generation context, and the Persona Helper backend on port `5003` for persistent goal storage.
 
 ## Current Shape
 
-- **Goals**: persona-scoped collections and goal cards, currently backed by local extension storage until the Persona Helper backend commands are implemented.
-- **Actions**: a fast hint form with intention, approach, and notes fields. The initial scaffold prepares the UI and payload shape but does not call an LLM yet.
-- **Settings**: backend port `5003`, Marinara connection selection, and connection fallback for future generation flows.
+- **Goals**: subject-scoped goal libraries, chat assignment, focused milestone navigation, directive progress tracking, React Flow maps, prompt-backed directive generation, lorebook context, debug panels, duplication, cleanup, and delete flows.
+- **Actions**: prompt-backed action hint generation with intention, approach, notes, lorebook context, recent hint backlog, prompt preview, raw generation output, and generation settings.
+- **Settings**: backend port, Marinara generation connection preferences, fallback behavior, shared model parameters, and extension/about details.
+
+## Concepts
+
+Persona Helper treats long-running intent as a goal tree:
+
+- **Goals** are durable backend records scoped to a subject namespace.
+- **Milestones** are focused outcomes inside a goal tree.
+- **Directives** are actions, requirements, opportunities, cautions, or constraints that move toward or away from a milestone.
+- **Subjects** can be personas, characters, or the `_extras` namespace for minor/throwaway characters.
+
+Goals are assigned to the current chat through backend chat bindings. The extension uses Marinara context when available, but also provides subject pickers because Marinara may not always expose the current persona or character list in a usable form.
+
+## Generation
+
+Actions and Goals both use prompt contracts from the Persona Helper backend prompt domain.
+
+Action hint generation expects prompts with:
+
+```text
+intention
+approach
+```
+
+Directive generation expects prompts with:
+
+```text
+milestone
+```
+
+Generation validates the selected prompt before each run. Goals directive generation only creates reviewable candidates under the currently focused milestone or directive. Candidates are editable in a modal, can be regenerated, and are only added to the backend after the user confirms selected rows.
 
 ## Source Layout
 
@@ -16,10 +46,10 @@ This is the plain JavaScript boilerplate for the extension. It sits between the 
 | --- | --- |
 | `src/main.jsx` | Extension entry point |
 | `src/Views/DrawerView.jsx` | Drawer shell, rail navigation, top tabs |
-| `src/Views/GoalsView.jsx` | Goal collection and goal-card starter view |
-| `src/Views/ActionsView.jsx` | Action hint starter view |
+| `src/Views/GoalsView.jsx` | Goals library, milestone view, setup/debug, generation, and about panels |
+| `src/Views/ActionsView.jsx` | Action hint composer, prompt setup, recent hints, and about panels |
 | `src/Views/SettingsView.jsx` | Backend and extension preferences |
-| `src/API/` | Backend, Marinara, settings, and local goal helpers |
+| `src/API/` | Persona backend, Marinara, prompt, extraction, lorebook, and settings helpers |
 | `src/Components/` | Reusable controls, snackbar, modal, and layout pieces |
 | `src/Styles/` | Inline style constants plus injected drawer CSS |
 | `scripts/check-bundle-size.mjs` | Bundle text-entry limit guard |
@@ -62,11 +92,13 @@ Run `pnpm zip` manually after each build when you need a new importable package.
 
 Marinara currently allows a package zip up to 32 MB, individual text entries up to 2 MB uncompressed, and total extracted text content up to 16 MB. The build script checks `dist/persona-helper.js` against the 2 MB text-entry limit.
 
-Current bundle size after the boilerplate pass is:
+Current bundle size is:
 
 ```text
-225159 bytes, 10.7% of 2097152
+580781 bytes, 27.7% of 2097152
 ```
+
+The exact value may move slightly after each build.
 
 ## Installation
 

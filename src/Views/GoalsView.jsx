@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import {
   CheckCircle2,
+  BookOpen,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -18,6 +19,7 @@ import {
   EyeOff,
   FolderCog,
   Library,
+  Lightbulb,
   ListChecks,
   LoaderCircle,
   PanelLeftClose,
@@ -28,6 +30,7 @@ import {
   Save,
   Search,
   Settings,
+  ScrollText,
   Star,
   Target,
   Trash2,
@@ -36,16 +39,45 @@ import {
   X,
 } from "lucide-react";
 import { getBackendBaseUrl, getGoalSchema, goalCommands } from "../API/personaBackend.js";
-import { getCharacterDetails, getCharacterSummaries, getCharacters, getPersonaContext, getPersonas } from "../API/marinara.js";
+import { extractionApi } from "../API/extraction.js";
+import {
+  generate,
+  getCharacterDetails,
+  getCharacterSummaries,
+  getCharacters,
+  getConnections,
+  getPersonaContext,
+  getPersonas,
+  getRecentMessages,
+  resolveGenerationConnectionId,
+} from "../API/marinara.js";
+import { makeLorebookEntryPointer } from "../API/lorebooks.js";
+import { promptApi } from "../API/prompt.js";
+import { loadPersonaHelperSettings, savePersonaHelperSettings } from "../API/settings.js";
+import { LorebookSelectModal } from "../Components/LorebookSelectModal.jsx";
+import { PromptSelectModal } from "../Components/PromptSelectModal.jsx";
 import { StatusSnackbar } from "../Components/StatusSnackbar.jsx";
 import { formStyles } from "../Styles/formStyles.js";
+import { promptPickerStyles } from "../Styles/promptPickerStyles.js";
 import { viewStyles } from "../Styles/viewStyles.js";
 
 const SUBJECT_SELECTION_KEY = "persona-helper-goal-subject-by-chat";
-const SETUP_PROMPT_DEBUG_KEY = "persona-helper-goal-setup-prompt-debug";
-const SETUP_RAW_DEBUG_KEY = "persona-helper-goal-setup-raw-debug";
-const SETUP_PARSED_DEBUG_KEY = "persona-helper-goal-setup-parsed-debug";
-const SETUP_ERROR_DEBUG_KEY = "persona-helper-goal-setup-error-debug";
+const GOAL_PROMPT_KEY = "persona-helper-goal-directive-prompt";
+const GOAL_PROMPT_VALIDATION_KEY = "persona-helper-goal-directive-prompt-validation";
+const GOAL_PROMPT_OVERRIDES_KEY = "persona-helper-goal-directive-prompt-overrides";
+const GOAL_CONTEXT_ENTRIES_KEY = "persona-helper-goal-directive-context-entries";
+const GOAL_SHOW_PROMPT_KEY = "persona-helper-goal-show-prompt";
+const GOAL_SHOW_GENERATION_OUTPUT_KEY = "persona-helper-goal-show-generation-output";
+const GOAL_PROMPT_SYSTEM_TEXT_KEY = "persona-helper-goal-prompt-system-text";
+const GOAL_PROMPT_MESSAGE_SET_KEY = "persona-helper-goal-prompt-message-set";
+const GOAL_RAW_GENERATION_OUTPUT_KEY = "persona-helper-goal-raw-generation-output";
+const GOAL_RAW_GENERATION_THINKING_KEY = "persona-helper-goal-raw-generation-thinking";
+const GOAL_INCLUDE_CHAT_HISTORY_KEY = "persona-helper-goal-include-chat-history";
+const GOAL_REQUIRED_FIELDS = ["milestone"];
+const GOAL_DIRECTIVE_EXTRACTION_FORMAT = "xml";
+const GOAL_DIRECTIVE_EXTRACTION_FIELD = "directive";
+const AUTHOR_NOTE_DOCUMENT_NAME = "Authors_Note";
+const AUTHOR_NOTE_DOCUMENT_SOURCE = "persona-helper-goals";
 const GOAL_DRAFTING_STATUSES = [
   "Assembling prompt",
   "Checking goal context",
@@ -326,12 +358,61 @@ function readStoredString(key) {
   return localStorage.getItem(key) || "";
 }
 
+function readStoredObject(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "null");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredObject(key, value) {
+  if (!value) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function readStoredBoolean(key, defaultValue = false) {
+  const stored = localStorage.getItem(key);
+  if (stored === null) return defaultValue;
+  return stored === "true";
+}
+
+function writeStoredBoolean(key, value) {
+  localStorage.setItem(key, value ? "true" : "false");
+}
+
 function writeStoredString(key, value) {
   if (!value) {
     localStorage.removeItem(key);
     return;
   }
   localStorage.setItem(key, value);
+}
+
+function readStoredPrompt() {
+  return readStoredObject(GOAL_PROMPT_KEY);
+}
+
+function writeStoredPrompt(prompt) {
+  writeStoredObject(GOAL_PROMPT_KEY, prompt);
+}
+
+function readStoredContextEntries() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GOAL_CONTEXT_ENTRIES_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry) => entry?.id && entry?.lorebookId && entry?.name);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredContextEntries(entries) {
+  localStorage.setItem(GOAL_CONTEXT_ENTRIES_KEY, JSON.stringify(entries));
 }
 
 function randomGoalDraftingStatus(current = "") {
@@ -355,31 +436,328 @@ function parseCandidateLines(raw) {
     .map((text) => ({ text, resolution_mode: "checklist" }));
 }
 
-function buildGoalDebugPrompt({ activeSubject, context, generationMode, promptNotes }) {
-  const subjectLabel = activeSubject?.label || "No subject selected";
-  const subjectKey = activeSubject?.key || "not-selected";
-  const chatId = context.chatId || "not-detected";
-  const task = generationMode === "initial"
-    ? "Draft initial milestones as reviewable candidates."
-    : "Draft directives under the selected milestone as reviewable candidates.";
+function createRequirementMap(prompt) {
+  const entriesById = new Map((prompt?.entries || []).map((entry) => [entry.id, entry]));
+  const requirementMap = new Map();
 
+  (prompt?.requirements || []).forEach((requirement) => {
+    const entry = entriesById.get(requirement.entry_id);
+    const entryDefaults = entry?.defaults?.[requirement.kind === "parameter" ? "parameters" : "inputs"] || {};
+    const normalized = {
+      ...requirement,
+      default: requirement.default ?? entryDefaults[requirement.var_name] ?? "",
+      sectionName: entry?.section?.name || entry?.label || "Prompt section",
+    };
+    const current = requirementMap.get(requirement.var_name) || [];
+    requirementMap.set(requirement.var_name, [...current, normalized]);
+  });
+
+  return requirementMap;
+}
+
+function overrideKey(requirement) {
+  return `${requirement.entry_id}:${requirement.kind}:${requirement.var_name}`;
+}
+
+function makeGoalOverrideRows(prompt, validation) {
+  if (!prompt || !validation) return [];
+  const requirementMap = createRequirementMap(prompt);
+  const requiredFields = new Set(GOAL_REQUIRED_FIELDS);
+  const requiredRows = (validation.additional_required_fields || []).map((name) => ({ name, required: true }));
+  const optionalRows = (validation.additional_optional_fields || []).map((name) => ({ name, required: false }));
+
+  return [...requiredRows, ...optionalRows]
+    .filter((row) => !requiredFields.has(row.name))
+    .flatMap((row) => {
+      const requirements = requirementMap.get(row.name) || [{ var_name: row.name, kind: "input", entry_id: "", default: "" }];
+      return requirements.map((requirement) => ({
+        ...row,
+        id: overrideKey(requirement),
+        entryId: requirement.entry_id,
+        kind: requirement.kind || "input",
+        defaultValue: requirement.default || "",
+        sectionName: requirement.sectionName || "Prompt section",
+      }));
+    });
+}
+
+function makeGoalRows(prompt, validation) {
+  if (!prompt || !validation) return [];
+  const requirementMap = createRequirementMap(prompt);
+
+  return GOAL_REQUIRED_FIELDS.flatMap((name) => {
+    const requirements = requirementMap.get(name) || [];
+    return requirements.map((requirement) => ({
+      name,
+      id: overrideKey(requirement),
+      entryId: requirement.entry_id,
+      kind: requirement.kind || "input",
+    }));
+  });
+}
+
+function createPromptContractSummary(prompt) {
+  if (!prompt) return null;
+  const fieldNames = new Set((prompt.requirements || []).map((requirement) => requirement.var_name).filter(Boolean));
+  const additional = new Map();
+
+  (prompt.requirements || []).forEach((requirement) => {
+    if (!requirement.var_name || GOAL_REQUIRED_FIELDS.includes(requirement.var_name)) return;
+    const current = additional.get(requirement.var_name);
+    additional.set(requirement.var_name, {
+      required: current?.required || requirement.default === null,
+    });
+  });
+
+  const missingFields = GOAL_REQUIRED_FIELDS.filter((field) => !fieldNames.has(field));
+  const additionalRequired = [];
+  const additionalOptional = [];
+
+  additional.forEach((value, field) => {
+    if (value.required) additionalRequired.push(field);
+    else additionalOptional.push(field);
+  });
+
+  return {
+    valid: missingFields.length === 0,
+    missing_fields: missingFields,
+    additional_required_fields: additionalRequired,
+    additional_optional_fields: additionalOptional,
+    available_fields: [...fieldNames],
+  };
+}
+
+function createDefaultOverrides(prompt, validation, current = {}) {
+  return Object.fromEntries(
+    makeGoalOverrideRows(prompt, validation).map((row) => [row.id, current[row.id] ?? current[row.name] ?? row.defaultValue ?? ""]),
+  );
+}
+
+function escapeDocumentContent(value) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeDocumentAttribute(value) {
+  return escapeDocumentContent(value).replace(/"/g, "&quot;");
+}
+
+function wrapContextDocuments(entries) {
+  if (!entries.length) return "";
+  return `<additional_context>\n${entries
+    .map((entry, index) => {
+      const name = escapeDocumentAttribute(entry.name || `Document ${index + 1}`);
+      const source = escapeDocumentAttribute(entry.lorebookName || entry.lorebookId || "lorebook");
+      return `  <document index="${index + 1}" name="${name}" source="${source}">\n${escapeDocumentContent(entry.content || "")}\n  </document>`;
+    })
+    .join("\n\n")}\n</additional_context>`;
+}
+
+function wrapAuthorNoteDocument(notes) {
+  const trimmed = String(notes || "").trim();
+  if (!trimmed) return "";
+  return `<additional_context>\n  <document index="1" name="${AUTHOR_NOTE_DOCUMENT_NAME}" source="${AUTHOR_NOTE_DOCUMENT_SOURCE}">\n${escapeDocumentContent(trimmed)}\n  </document>\n</additional_context>`;
+}
+
+function wrapChatHistory(messages) {
+  if (!messages.length) return "";
+  return `<chat_history>\n${messages
+    .map((message, index) => {
+      const role = escapeDocumentAttribute(message.role || "message");
+      return `  <message index="${index + 1}" role="${role}">\n${escapeDocumentContent(message.content || "")}\n  </message>`;
+    })
+    .join("\n\n")}\n</chat_history>`;
+}
+
+function stitchSelectedPromptText(prompt) {
+  if (!prompt?.entries?.length) return "";
+  return prompt.entries
+    .filter((entry) => entry.enabled !== false)
+    .map((entry) => entry.section?.body || "")
+    .filter((body) => body.trim())
+    .join("\n\n");
+}
+
+function messageName(value) {
+  const normalized = value.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+/g, "_").slice(0, 64);
+  return normalized || undefined;
+}
+
+function buildDirectiveGenerationContext({ activeSubject, chatId, goal, milestone, notes }) {
   return [
-    "Persona Helper Goal Generation Debug",
+    `Subject: ${activeSubject?.label || "Not selected"}`,
+    `Backend persona namespace: ${activeSubject?.key || "not-selected"}`,
+    `Chat ID: ${chatId || "not-detected"}`,
+    `Goal: ${goal?.name || "Untitled goal"}`,
+    `Milestone: ${getNodeText(milestone) || "Untitled milestone"}`,
     "",
-    `Generation target: ${task}`,
-    `Chat ID: ${chatId}`,
-    `Subject: ${subjectLabel}`,
-    `Backend persona namespace: ${subjectKey}`,
-    "",
-    "Generation framing:",
-    "- Treat goals as intended outcomes and children as milestones or directives.",
-    "- Use directives for actions, requirements, opportunities, constraints, or cautions that move toward or away from a milestone.",
-    "- Do not create truth. Return candidates for user review.",
-    "- Keep each candidate concrete and short.",
-    "",
-    "User notes:",
-    promptNotes.trim() || "None supplied.",
-  ].join("\n");
+    "Generate candidate directives under this milestone.",
+    "Directives are reviewable affordances, requirements, cautions, actions, or constraints that move toward or away from the milestone.",
+    "Do not assume the candidates are final. The player will edit and approve them before they are stored.",
+    notes?.trim() ? `\nNotes:\n${notes.trim()}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function buildPromptMessageSet({ activeSubject, chatId, contextEntries, extractionPrompt = "", goal, includeChatHistory = true, milestone, notes = "", systemPrompt }) {
+  const attachedDocuments = wrapContextDocuments(contextEntries);
+  const authorNote = wrapAuthorNoteDocument(notes);
+  const requestContext = buildDirectiveGenerationContext({ activeSubject, chatId, goal, milestone, notes });
+
+  return JSON.stringify(
+    [
+      {
+        block: "chat_history",
+        role: "user",
+        content: includeChatHistory
+          ? "Recent chat messages from the current chat will be inserted here when available."
+          : "Chat history is disabled for this directive generation run.",
+      },
+      {
+        block: "attached_documents",
+        role: "user",
+        content: attachedDocuments || "<additional_context>...user attached documents...</additional_context>",
+      },
+      {
+        block: "system_prompt",
+        role: "system",
+        content: systemPrompt.trim() || "Backend prompt output will be inserted here.",
+      },
+      {
+        block: "authors_notes",
+        role: "user",
+        content: authorNote || "<additional_context><document name=\"Authors_Note\">...</document></additional_context>",
+      },
+      {
+        block: "generation_context",
+        role: "user",
+        content: requestContext || "Directive generation context will be inserted here.",
+      },
+      {
+        block: "extraction_prompt",
+        role: "user",
+        content: extractionPrompt.trim() || `${GOAL_DIRECTIVE_EXTRACTION_FORMAT}:${GOAL_DIRECTIVE_EXTRACTION_FIELD}`,
+      },
+    ],
+    null,
+    2,
+  );
+}
+
+function buildGenerationMessages({ activeSubject, chatHistory = "", chatId, contextEntries, extractionPrompt = "", goal, milestone, notes = "", systemPrompt }) {
+  const attachedDocuments = wrapContextDocuments(contextEntries);
+  const authorNote = wrapAuthorNoteDocument(notes);
+  const requestContext = buildDirectiveGenerationContext({ activeSubject, chatId, goal, milestone, notes });
+  return [
+    ...(chatHistory ? [{ role: "user", content: chatHistory, name: messageName("Chat History") }] : []),
+    ...(attachedDocuments ? [{ role: "user", content: attachedDocuments, name: messageName("Attached Documents") }] : []),
+    ...(systemPrompt.trim() ? [{ role: "system", content: systemPrompt.trim(), name: messageName("Persona Helper Goals") }] : []),
+    ...(authorNote ? [{ role: "user", content: authorNote, name: messageName("Authors Note") }] : []),
+    { role: "user", content: requestContext, name: messageName("Directive Context") },
+    {
+      role: "user",
+      content: extractionPrompt.trim() || "Return concise directives as separate XML items.",
+      name: messageName("Extraction Prompt"),
+    },
+  ];
+}
+
+function buildGoalGenerationContext({ milestone, prompt, validation, promptOverrides }) {
+  const goalValues = {
+    milestone: getNodeText(milestone),
+  };
+  const overrides = {};
+
+  [...makeGoalRows(prompt, validation), ...makeGoalOverrideRows(prompt, validation)].forEach((row) => {
+    if (!row.entryId) return;
+    const value = GOAL_REQUIRED_FIELDS.includes(row.name) ? goalValues[row.name] : (promptOverrides[row.id] ?? "");
+    if (!value.trim()) return;
+    const kind = row.kind === "parameter" ? "parameters" : "inputs";
+    overrides[row.entryId] = {
+      ...(overrides[row.entryId] || {}),
+      [kind]: {
+        ...(overrides[row.entryId]?.[kind] || {}),
+        [row.name]: value,
+      },
+    };
+  });
+
+  return { overrides };
+}
+
+function optionalFloat(value) {
+  if (!String(value || "").trim()) return undefined;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function optionalInt(value) {
+  if (!String(value || "").trim()) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function generationParameters(settings) {
+  return {
+    maxTokens: optionalInt(settings.generationMaxTokens) ?? 1024,
+    ...(optionalFloat(settings.generationTemperature) !== undefined ? { temperature: optionalFloat(settings.generationTemperature) } : {}),
+    ...(optionalFloat(settings.generationTopP) !== undefined ? { topP: optionalFloat(settings.generationTopP) } : {}),
+    ...(optionalInt(settings.generationTopK) !== undefined ? { topK: optionalInt(settings.generationTopK) } : {}),
+    ...(optionalFloat(settings.generationFrequencyPenalty) !== undefined
+      ? { frequencyPenalty: optionalFloat(settings.generationFrequencyPenalty) }
+      : {}),
+    ...(optionalFloat(settings.generationPresencePenalty) !== undefined
+      ? { presencePenalty: optionalFloat(settings.generationPresencePenalty) }
+      : {}),
+  };
+}
+
+function chatHistoryLimit(settings) {
+  const parsed = optionalInt(settings.chatHistoryLimit);
+  if (parsed === undefined) return 20;
+  return Math.min(200, Math.max(0, parsed));
+}
+
+async function getGoalDirectiveExtractionPrompt() {
+  return extractionApi.getPrompt(GOAL_DIRECTIVE_EXTRACTION_FORMAT, GOAL_DIRECTIVE_EXTRACTION_FIELD);
+}
+
+async function getCurrentChatHistory(chatId, settings) {
+  const limit = chatHistoryLimit(settings);
+  if (!chatId || !limit) return "";
+  try {
+    const messages = await getRecentMessages(chatId, limit);
+    return wrapChatHistory(messages);
+  } catch (err) {
+    console.warn("[Persona Helper] Could not load current chat history.", err);
+    return "";
+  }
+}
+
+async function parseGeneratedDirectives(output) {
+  const extracted = await extractionApi.parse(GOAL_DIRECTIVE_EXTRACTION_FORMAT, GOAL_DIRECTIVE_EXTRACTION_FIELD, output, true);
+  return extracted.slice(0, 24);
+}
+
+function parseDirectiveOutput(output) {
+  return parseCandidateLines(output).map((item) => item.text).slice(0, 24);
+}
+
+function createDirectiveCandidate(text = "", source = "generated") {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    selected: true,
+    text,
+    source,
+    resolutionMode: "checklist",
+    target: 1,
+  };
+}
+
+function serializeDirectiveCandidate(candidate) {
+  return serializeLiveNodeDraft({
+    text: candidate.text,
+    resolutionMode: candidate.resolutionMode,
+    target: candidate.target,
+  });
 }
 
 function createBlankGoalDraft(collectionId = "") {
@@ -450,6 +828,15 @@ function getNodeProgress(node) {
 
 function getNodeTarget(node) {
   return Math.max(1, Number(node?.target) || 1);
+}
+
+function getNodePathLabel(path = []) {
+  return path
+    .map((node, index) => {
+      if (index === 0) return getNodeText(node) || node?.id || "Root";
+      return node?.id || getNodeText(node) || "unknown";
+    })
+    .join(" / ");
 }
 
 function createLiveNodeDraft() {
@@ -846,6 +1233,29 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
   const [focusedNodeIds, setFocusedNodeIds] = useState({});
   const [mapGoal, setMapGoal] = useState(null);
   const [scopeExpanded, setScopeExpanded] = useState(false);
+  const [deleteNodeDraft, setDeleteNodeDraft] = useState(null);
+  const [selectedPrompt, setSelectedPrompt] = useState(() => readStoredPrompt());
+  const [promptValidation, setPromptValidation] = useState(() => readStoredObject(GOAL_PROMPT_VALIDATION_KEY));
+  const [promptOverrides, setPromptOverrides] = useState(() => readStoredObject(GOAL_PROMPT_OVERRIDES_KEY) || {});
+  const [contextEntries, setContextEntries] = useState(() => readStoredContextEntries());
+  const [showPrompt] = useState(() => readStoredBoolean(GOAL_SHOW_PROMPT_KEY));
+  const [showGenerationOutput] = useState(() => readStoredBoolean(GOAL_SHOW_GENERATION_OUTPUT_KEY));
+  const [capturedSystemPrompt, setCapturedSystemPrompt] = useState(() => readStoredString(GOAL_PROMPT_SYSTEM_TEXT_KEY));
+  const [capturedMessageSet, setCapturedMessageSet] = useState(() => readStoredString(GOAL_PROMPT_MESSAGE_SET_KEY));
+  const [rawGenerationOutput, setRawGenerationOutput] = useState(() => readStoredString(GOAL_RAW_GENERATION_OUTPUT_KEY));
+  const [rawGenerationThinking, setRawGenerationThinking] = useState(() => readStoredString(GOAL_RAW_GENERATION_THINKING_KEY));
+  const [promptPreviewOpen, setPromptPreviewOpen] = useState(false);
+  const [promptPreviewTab, setPromptPreviewTab] = useState("system");
+  const [rawGenerationOpen, setRawGenerationOpen] = useState(false);
+  const [rawGenerationTab, setRawGenerationTab] = useState("output");
+  const [directiveDraft, setDirectiveDraft] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [draftingStatus, setDraftingStatus] = useState(() => randomGoalDraftingStatus());
+  const [draftingPulse, setDraftingPulse] = useState(0);
+  const [settings, setSettings] = useState(() => loadPersonaHelperSettings());
+  const [connections, setConnections] = useState([]);
+  const [includeChatHistory, setIncludeChatHistory] = useState(() => readStoredBoolean(GOAL_INCLUDE_CHAT_HISTORY_KEY, true));
+  const [message, setMessage] = useState("");
 
   const persona = activeSubject?.key || "";
 
@@ -874,6 +1284,20 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
     }
   }
 
+  function showMessage(nextMessage) {
+    setMessage("");
+    window.setTimeout(() => setMessage(nextMessage), 0);
+  }
+
+  function updateGenerationSettings(patch) {
+    setSettings((current) => savePersonaHelperSettings({ ...current, ...patch }));
+  }
+
+  function updateIncludeChatHistory(nextValue) {
+    setIncludeChatHistory(nextValue);
+    writeStoredBoolean(GOAL_INCLUDE_CHAT_HISTORY_KEY, nextValue);
+  }
+
   useEffect(() => {
     setScopeId("all");
     setGroups([]);
@@ -883,6 +1307,81 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
     loadTasks("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendReady, persona, chatId]);
+
+  useEffect(() => {
+    const onSettingsChange = () => setSettings(loadPersonaHelperSettings());
+    window.addEventListener("persona-helper-settings-change", onSettingsChange);
+    return () => window.removeEventListener("persona-helper-settings-change", onSettingsChange);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getConnections()
+      .then((items) => {
+        if (!cancelled) setConnections(items);
+      })
+      .catch((error) => {
+        if (!cancelled) showMessage(error?.message || "Could not load generation connections.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    writeStoredPrompt(selectedPrompt);
+  }, [selectedPrompt]);
+
+  useEffect(() => {
+    writeStoredObject(GOAL_PROMPT_VALIDATION_KEY, promptValidation);
+  }, [promptValidation]);
+
+  useEffect(() => {
+    writeStoredObject(GOAL_PROMPT_OVERRIDES_KEY, promptOverrides);
+  }, [promptOverrides]);
+
+  useEffect(() => {
+    writeStoredContextEntries(contextEntries);
+  }, [contextEntries]);
+
+  useEffect(() => {
+    writeStoredString(GOAL_PROMPT_SYSTEM_TEXT_KEY, capturedSystemPrompt);
+  }, [capturedSystemPrompt]);
+
+  useEffect(() => {
+    writeStoredString(GOAL_PROMPT_MESSAGE_SET_KEY, capturedMessageSet);
+  }, [capturedMessageSet]);
+
+  useEffect(() => {
+    writeStoredString(GOAL_RAW_GENERATION_OUTPUT_KEY, rawGenerationOutput);
+  }, [rawGenerationOutput]);
+
+  useEffect(() => {
+    writeStoredString(GOAL_RAW_GENERATION_THINKING_KEY, rawGenerationThinking);
+  }, [rawGenerationThinking]);
+
+  useEffect(() => {
+    if (!selectedPrompt) return;
+    const summary = createPromptContractSummary(selectedPrompt);
+    setPromptValidation(summary);
+    setPromptOverrides((current) => createDefaultOverrides(selectedPrompt, summary, current));
+  }, [selectedPrompt]);
+
+  useEffect(() => {
+    if (!generating) return undefined;
+    setDraftingStatus((current) => randomGoalDraftingStatus(current));
+    setDraftingPulse(0);
+    const interval = window.setInterval(() => {
+      setDraftingStatus((current) => randomGoalDraftingStatus(current));
+    }, 1400);
+    const pulseInterval = window.setInterval(() => {
+      setDraftingPulse((current) => current + 1);
+    }, 260);
+    return () => {
+      window.clearInterval(interval);
+      window.clearInterval(pulseInterval);
+    };
+  }, [generating]);
 
   async function selectScope(nextScopeId) {
     setScopeId(nextScopeId);
@@ -924,6 +1423,26 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
     }
   }
 
+  async function deleteNode(goal, node) {
+    if (!goal?.id || !node?.id) return;
+    const match = findGoalNode(goal.nodes || [], node.id);
+    setStatus({ loading: true, error: "" });
+    try {
+      const result = await goalCommands.deleteNode({
+        persona,
+        goal_id: goal.id,
+        node_id: node.id,
+      });
+      setGroups((current) => replaceGoalInGroups(current, result));
+      setFocusedNodeIds((current) => ({ ...current, [goal.id]: match?.parentId || "" }));
+      setDeleteNodeDraft(null);
+      setStatus({ loading: false, error: "" });
+      showMessage("Milestone removed.");
+    } catch (error) {
+      setStatus({ loading: false, error: error?.message || "Could not remove milestone." });
+    }
+  }
+
   async function addChild(goal, parentId) {
     const draftKey = `${goal.id}:${parentId || "root"}`;
     const draft = addDrafts[draftKey] || createLiveNodeDraft();
@@ -943,6 +1462,147 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
     } catch (error) {
       setStatus({ loading: false, error: error?.message || "Could not add directive." });
     }
+  }
+
+  async function addGeneratedDirectives(draft = directiveDraft) {
+    if (!draft?.goal?.id || !draft?.parent?.id) return;
+    const nodes = (draft.candidates || [])
+      .filter((candidate) => candidate.selected)
+      .map(serializeDirectiveCandidate)
+      .filter((node) => node.text);
+    if (!nodes.length) {
+      showMessage("Select at least one directive to add.");
+      return;
+    }
+
+    setStatus({ loading: true, error: "" });
+    try {
+      const result = await goalCommands.addNodes({
+        persona,
+        goal_id: draft.goal.id,
+        parent_id: draft.parent.id,
+        nodes,
+      });
+      setGroups((current) => replaceGoalInGroups(current, result));
+      setDirectiveDraft(null);
+      setStatus({ loading: false, error: "" });
+      showMessage(`${nodes.length} directive${nodes.length === 1 ? "" : "s"} added.`);
+    } catch (error) {
+      setStatus({ loading: false, error: error?.message || "Could not add generated directives." });
+    }
+  }
+
+  function openDirectiveDraft(goal, parent) {
+    if (!selectedPrompt?.id) {
+      showMessage("Choose a directive prompt in Setup first.");
+      return;
+    }
+    setDirectiveDraft({
+      goal,
+      parent,
+      notes: "",
+      candidates: [],
+      usedExtractor: true,
+    });
+  }
+
+  async function executeDirectivePrompt(milestone) {
+    if (!selectedPrompt?.id) throw new Error("Choose a directive prompt in Setup first.");
+
+    const validation = await promptApi.validateContract(selectedPrompt.id, GOAL_REQUIRED_FIELDS);
+    setPromptValidation(validation);
+    if (!validation.valid) {
+      setSelectedPrompt(null);
+      setPromptOverrides({});
+      throw new Error("Selected prompt no longer matches the directive contract.");
+    }
+
+    const request = buildGoalGenerationContext({
+      milestone,
+      prompt: selectedPrompt,
+      validation,
+      promptOverrides,
+    });
+    const execution = await promptApi.execute({
+      id: selectedPrompt.id,
+      ...(Object.keys(request.overrides).length ? { overrides: request.overrides } : {}),
+    });
+    return execution.text.trim();
+  }
+
+  async function generateDirectiveDrafts(targetDraft = directiveDraft) {
+    if (!targetDraft?.parent) return;
+    setGenerating(true);
+    try {
+      const systemPrompt = await executeDirectivePrompt(targetDraft.parent);
+      if (!systemPrompt.trim()) return;
+
+      const extractionPrompt = await getGoalDirectiveExtractionPrompt();
+      const chatHistory = includeChatHistory ? await getCurrentChatHistory(chatId, settings) : "";
+      const messages = buildGenerationMessages({
+        activeSubject,
+        chatHistory,
+        chatId,
+        contextEntries,
+        extractionPrompt,
+        goal: targetDraft.goal,
+        milestone: targetDraft.parent,
+        notes: targetDraft.notes,
+        systemPrompt,
+      });
+      const connection = await resolveGenerationConnectionId(settings.preferredConnectionId, settings.allowConnectionFallback);
+      const generation = await generate(connection.id, messages, generationParameters(settings));
+      const trimmedOutput = generation.content.trim();
+      const trimmedThinking = generation.thinking.trim();
+      let directiveLines = [];
+      let usedExtractor = true;
+      try {
+        directiveLines = await parseGeneratedDirectives(trimmedOutput);
+      } catch (err) {
+        usedExtractor = false;
+        console.warn("[Persona Helper] Directive extraction parse failed; using local parser.", err);
+        directiveLines = parseDirectiveOutput(trimmedOutput);
+      }
+      const candidates = directiveLines.map((line) => createDirectiveCandidate(line, usedExtractor ? "extracted" : "generated"));
+
+      setCapturedSystemPrompt(systemPrompt);
+      setCapturedMessageSet(JSON.stringify(messages, null, 2));
+      setRawGenerationOutput(trimmedOutput);
+      setRawGenerationThinking(trimmedThinking);
+      setPromptPreviewOpen(true);
+      setPromptPreviewTab("system");
+      setRawGenerationOpen(true);
+      setRawGenerationTab("output");
+      setDirectiveDraft((current) => ({
+        ...(current || targetDraft),
+        candidates,
+        usedExtractor,
+      }));
+      showMessage(
+        candidates.length
+          ? `${usedExtractor ? "Extracted" : "Generated"} ${candidates.length} directive${candidates.length === 1 ? "" : "s"} with ${connection.label}.`
+          : "Generation returned no parsed directives.",
+      );
+    } catch (error) {
+      showMessage(error?.message || "Could not generate directives.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function attachContextEntry(entry) {
+    setContextEntries((current) => {
+      const pointer = makeLorebookEntryPointer(entry);
+      if (current.some((item) => makeLorebookEntryPointer(item) === pointer)) return current;
+      return [...current, entry];
+    });
+    showMessage("Context attached.");
+  }
+
+  function removeContextEntry(entry) {
+    const pointer = makeLorebookEntryPointer(entry);
+    setContextEntries((current) => current.filter((item) => makeLorebookEntryPointer(item) !== pointer));
+    showMessage("Context removed.");
   }
 
   function focusNode(goal, nodeId) {
@@ -971,6 +1631,136 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
     } catch (error) {
       setStatus({ loading: false, error: error?.message || "Could not set current focus." });
     }
+  }
+
+  function renderDraftingStatus() {
+    const statusText = `${draftingStatus}${DRAFTING_ELLIPSIS}`;
+    const pulseIndex = draftingPulse % (statusText.length + 4);
+
+    return (
+      <span style={viewStyles.draftingStatus}>
+        <span style={viewStyles.draftingStatusText} aria-label={statusText}>
+          {statusText.split("").map((char, index) => (
+            <span
+              aria-hidden="true"
+              key={`${char}-${index}`}
+              style={{
+                ...viewStyles.draftingStatusChar,
+                color: char.trim() ? draftingCharacterColor(index, pulseIndex) : "transparent",
+              }}
+            >
+              {char === " " ? "\u00a0" : char}
+            </span>
+          ))}
+        </span>
+      </span>
+    );
+  }
+
+  function renderPromptPreview() {
+    if (!showPrompt) return null;
+    const promptViewerText =
+      promptPreviewTab === "messages"
+        ? capturedMessageSet || "No message set captured yet."
+        : capturedSystemPrompt || stitchSelectedPromptText(selectedPrompt) || "No backend prompt captured yet.";
+
+    return (
+      <section style={viewStyles.panel}>
+        <button
+          type="button"
+          style={viewStyles.disclosureButtonSmall}
+          aria-expanded={promptPreviewOpen}
+          onClick={() => setPromptPreviewOpen((value) => !value)}
+        >
+          <span>Prompt Preview</span>
+          {promptPreviewOpen ? <ChevronDown size="1rem" /> : <ChevronRight size="1rem" />}
+        </button>
+        {promptPreviewOpen ? (
+          <div style={viewStyles.rawViewer}>
+            <div style={viewStyles.rawTabs} role="tablist" aria-label="Directive prompt preview">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={promptPreviewTab === "system"}
+                style={{
+                  ...viewStyles.rawTabButton,
+                  ...(promptPreviewTab === "system" ? viewStyles.rawTabButtonActive : undefined),
+                }}
+                onClick={() => setPromptPreviewTab("system")}
+              >
+                System Prompt
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={promptPreviewTab === "messages"}
+                style={{
+                  ...viewStyles.rawTabButton,
+                  ...(promptPreviewTab === "messages" ? viewStyles.rawTabButtonActive : undefined),
+                }}
+                onClick={() => setPromptPreviewTab("messages")}
+              >
+                Message Set
+              </button>
+            </div>
+            <pre style={viewStyles.rawOutput}>{promptViewerText}</pre>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderRawGenerationOutput() {
+    if (!showGenerationOutput) return null;
+    const rawViewerText =
+      rawGenerationTab === "thinking"
+        ? rawGenerationThinking || "No thinking output captured for the last generation."
+        : rawGenerationOutput || "No generation output captured yet.";
+
+    return (
+      <section style={viewStyles.panel}>
+        <button
+          type="button"
+          style={viewStyles.disclosureButtonSmall}
+          aria-expanded={rawGenerationOpen}
+          onClick={() => setRawGenerationOpen((value) => !value)}
+        >
+          <span>Raw Generation Output</span>
+          {rawGenerationOpen ? <ChevronDown size="1rem" /> : <ChevronRight size="1rem" />}
+        </button>
+        {rawGenerationOpen ? (
+          <div style={viewStyles.rawViewer}>
+            <div style={viewStyles.rawTabs} role="tablist" aria-label="Raw directive generation output">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rawGenerationTab === "output"}
+                style={{
+                  ...viewStyles.rawTabButton,
+                  ...(rawGenerationTab === "output" ? viewStyles.rawTabButtonActive : undefined),
+                }}
+                onClick={() => setRawGenerationTab("output")}
+              >
+                Output
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rawGenerationTab === "thinking"}
+                style={{
+                  ...viewStyles.rawTabButton,
+                  ...(rawGenerationTab === "thinking" ? viewStyles.rawTabButtonActive : undefined),
+                }}
+                onClick={() => setRawGenerationTab("thinking")}
+              >
+                Thinking
+              </button>
+            </div>
+            <pre style={viewStyles.rawOutput}>{rawViewerText}</pre>
+          </div>
+        ) : null}
+      </section>
+    );
   }
 
   const targets = binding?.targets || [];
@@ -1096,6 +1886,8 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
               key={goal.id}
               onDraftChange={setAddDrafts}
               onFocusNode={focusNode}
+              onGenerateDirectives={openDirectiveDraft}
+              onRequestDeleteNode={(goal, node) => setDeleteNodeDraft({ goal, node })}
               onSetCurrentFocus={setCurrentFocus}
               onShowFullTree={openFullTree}
               onUpdateNode={updateNode}
@@ -1114,6 +1906,388 @@ function TasksView({ activeSubject, backendReady, chatId, onOpenLibrary }) {
           }}
         />
       ) : null}
+      {renderPromptPreview()}
+      {renderRawGenerationOutput()}
+      {directiveDraft ? (
+        <DirectiveDraftDialog
+          connections={connections}
+          contextEntries={contextEntries}
+          draft={directiveDraft}
+          generating={generating}
+          includeChatHistory={includeChatHistory}
+          onAddBlank={() => setDirectiveDraft((current) => ({
+            ...current,
+            candidates: [...(current?.candidates || []), createDirectiveCandidate("", "manual")],
+          }))}
+          onAttachContext={attachContextEntry}
+          onClose={() => setDirectiveDraft(null)}
+          onConfirm={() => addGeneratedDirectives()}
+          onGenerate={() => generateDirectiveDrafts()}
+          onRemoveContext={removeContextEntry}
+          onIncludeChatHistoryChange={updateIncludeChatHistory}
+          onSettingsChange={updateGenerationSettings}
+          onUpdate={setDirectiveDraft}
+          renderDraftingStatus={renderDraftingStatus}
+          settings={settings}
+        />
+      ) : null}
+      {deleteNodeDraft ? (
+        <DeleteNodeDialog
+          draft={deleteNodeDraft}
+          onCancel={() => setDeleteNodeDraft(null)}
+          onConfirm={() => deleteNode(deleteNodeDraft.goal, deleteNodeDraft.node)}
+        />
+      ) : null}
+      <StatusSnackbar message={message} />
+    </div>
+  );
+}
+
+function DirectiveDraftDialog({
+  connections,
+  contextEntries,
+  draft,
+  generating,
+  includeChatHistory,
+  onAddBlank,
+  onAttachContext,
+  onClose,
+  onConfirm,
+  onGenerate,
+  onIncludeChatHistoryChange,
+  onRemoveContext,
+  onSettingsChange,
+  onUpdate,
+  renderDraftingStatus,
+  settings,
+}) {
+  const [contextOpen, setContextOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [lorebookModalOpen, setLorebookModalOpen] = useState(false);
+  const selectedCount = (draft.candidates || []).filter((candidate) => candidate.selected && candidate.text.trim()).length;
+
+  function updateCandidate(id, patch) {
+    onUpdate((current) => ({
+      ...current,
+      candidates: (current?.candidates || []).map((candidate) => (candidate.id === id ? { ...candidate, ...patch } : candidate)),
+    }));
+  }
+
+  function removeCandidate(id) {
+    onUpdate((current) => ({
+      ...current,
+      candidates: (current?.candidates || []).filter((candidate) => candidate.id !== id),
+    }));
+  }
+
+  return (
+    <div style={viewStyles.modalBackdrop}>
+      <section style={{ ...viewStyles.modalPanel, width: "min(48rem, 100%)" }}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>Generate Directives</h3>
+            <p style={viewStyles.muted}>Add directives under: {getNodeText(draft.parent) || "Untitled milestone"}</p>
+          </div>
+          <button type="button" style={formStyles.iconButton} title="Close directive drafts" onClick={onClose}>
+            <X size="0.875rem" />
+          </button>
+        </div>
+
+        <label style={formStyles.field}>
+          <span style={formStyles.label}>Notes</span>
+          <textarea
+            style={formStyles.textareaSmall}
+            value={draft.notes || ""}
+            onChange={(event) => onUpdate((current) => ({ ...current, notes: event.target.value }))}
+            placeholder="Optional guidance for this generation"
+          />
+        </label>
+
+        <section style={viewStyles.panel}>
+          <button
+            type="button"
+            style={viewStyles.disclosureButtonSmall}
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen((value) => !value)}
+          >
+            <span>Generation Settings</span>
+            {settingsOpen ? <ChevronDown size="1rem" /> : <ChevronRight size="1rem" />}
+          </button>
+          {settingsOpen ? (
+            <div style={viewStyles.stack}>
+              <label style={formStyles.field}>
+                <span style={formStyles.label}>Preferred connection</span>
+                <select
+                  style={formStyles.input}
+                  value={settings.preferredConnectionId}
+                  onChange={(event) => onSettingsChange({ preferredConnectionId: event.target.value })}
+                >
+                  <option value="">No preferred connection</option>
+                  {connections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name}
+                      {connection.model ? ` (${connection.model})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <SwitchField
+                checked={settings.allowConnectionFallback}
+                label="Allow connection fallback"
+                onChange={(checked) => onSettingsChange({ allowConnectionFallback: checked })}
+              />
+              <SwitchField
+                checked={includeChatHistory}
+                label="Include chat history"
+                onChange={onIncludeChatHistoryChange}
+              />
+              <div style={viewStyles.fieldGrid}>
+                {includeChatHistory ? (
+                  <label style={formStyles.field}>
+                    <span style={formStyles.label}>Messages back</span>
+                    <input
+                      style={formStyles.input}
+                      value={settings.chatHistoryLimit}
+                      onChange={(event) => onSettingsChange({ chatHistoryLimit: event.target.value })}
+                      inputMode="numeric"
+                      placeholder="20"
+                    />
+                  </label>
+                ) : null}
+                <label style={formStyles.field}>
+                  <span style={formStyles.label}>Max tokens</span>
+                  <input
+                    style={formStyles.input}
+                    value={settings.generationMaxTokens}
+                    onChange={(event) => onSettingsChange({ generationMaxTokens: event.target.value })}
+                    inputMode="numeric"
+                    placeholder="1024"
+                  />
+                </label>
+                <label style={formStyles.field}>
+                  <span style={formStyles.label}>Temperature</span>
+                  <input
+                    style={formStyles.input}
+                    value={settings.generationTemperature}
+                    onChange={(event) => onSettingsChange({ generationTemperature: event.target.value })}
+                    inputMode="decimal"
+                    placeholder="provider default"
+                  />
+                </label>
+                <label style={formStyles.field}>
+                  <span style={formStyles.label}>Top P</span>
+                  <input
+                    style={formStyles.input}
+                    value={settings.generationTopP}
+                    onChange={(event) => onSettingsChange({ generationTopP: event.target.value })}
+                    inputMode="decimal"
+                    placeholder="provider default"
+                  />
+                </label>
+                <label style={formStyles.field}>
+                  <span style={formStyles.label}>Top K</span>
+                  <input
+                    style={formStyles.input}
+                    value={settings.generationTopK}
+                    onChange={(event) => onSettingsChange({ generationTopK: event.target.value })}
+                    inputMode="numeric"
+                    placeholder="provider default"
+                  />
+                </label>
+                <label style={formStyles.field}>
+                  <span style={formStyles.label}>Frequency penalty</span>
+                  <input
+                    style={formStyles.input}
+                    value={settings.generationFrequencyPenalty}
+                    onChange={(event) => onSettingsChange({ generationFrequencyPenalty: event.target.value })}
+                    inputMode="decimal"
+                    placeholder="provider default"
+                  />
+                </label>
+                <label style={formStyles.field}>
+                  <span style={formStyles.label}>Presence penalty</span>
+                  <input
+                    style={formStyles.input}
+                    value={settings.generationPresencePenalty}
+                    onChange={(event) => onSettingsChange({ generationPresencePenalty: event.target.value })}
+                    inputMode="decimal"
+                    placeholder="provider default"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        <section style={viewStyles.panel}>
+          <button
+            type="button"
+            style={viewStyles.disclosureButtonSmall}
+            aria-expanded={contextOpen}
+            onClick={() => setContextOpen((value) => !value)}
+          >
+            <span>Lorebook Context</span>
+            {contextOpen ? <ChevronDown size="1rem" /> : <ChevronRight size="1rem" />}
+          </button>
+          {contextOpen ? (
+            <div style={viewStyles.stack}>
+              <div style={viewStyles.panelHeader}>
+                <p style={viewStyles.muted}>Attach additional context for directive generation.</p>
+                <button type="button" style={formStyles.primaryButton} onClick={() => setLorebookModalOpen(true)}>
+                  <BookOpen size="0.9375rem" />
+                  Attach
+                </button>
+              </div>
+              <div style={viewStyles.scrollStack}>
+                {contextEntries.map((entry) => (
+                  <article key={makeLorebookEntryPointer(entry)} style={promptPickerStyles.detailBlock}>
+                    <div style={viewStyles.panelHeader}>
+                      <div style={viewStyles.stack}>
+                        <p style={viewStyles.kicker}>{entry.name}</p>
+                        <p style={viewStyles.muted}>{entry.lorebookName || entry.lorebookId}</p>
+                      </div>
+                      <button type="button" style={formStyles.iconButton} title="Remove context" onClick={() => onRemoveContext(entry)}>
+                        <X size="0.875rem" />
+                      </button>
+                    </div>
+                    <pre style={promptPickerStyles.promptBody}>{entry.content || "No content."}</pre>
+                  </article>
+                ))}
+                {!contextEntries.length ? <div style={viewStyles.empty}>No lorebook context attached.</div> : null}
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h4 style={viewStyles.title}>Draft Candidates</h4>
+            <p style={viewStyles.muted}>{selectedCount} selected for commit</p>
+          </div>
+          <div style={viewStyles.cardToolbar}>
+            <button type="button" style={formStyles.secondaryButton} onClick={onAddBlank}>
+              <Plus size="0.875rem" />
+              Blank
+            </button>
+            {generating ? (
+              <div style={viewStyles.draftingIndicator} role="status" aria-live="polite">
+                <LoaderCircle size="0.9375rem" style={viewStyles.draftingSpinner} />
+                {renderDraftingStatus()}
+              </div>
+            ) : (
+              <button type="button" style={formStyles.primaryButton} onClick={onGenerate}>
+                <Lightbulb size="0.9375rem" />
+                {draft.candidates?.length ? "Regenerate" : "Generate"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={viewStyles.scrollStack}>
+          {(draft.candidates || []).map((candidate) => {
+            const isAccumulation = candidate.resolutionMode === "accumulation";
+            return (
+              <article key={candidate.id} style={promptPickerStyles.detailBlock}>
+                <div style={viewStyles.panelHeader}>
+                  <SwitchField
+                    checked={candidate.selected}
+                    label={candidate.selected ? "Selected" : "Skipped"}
+                    onChange={(checked) => updateCandidate(candidate.id, { selected: checked })}
+                  />
+                  <button type="button" style={formStyles.iconButton} title="Remove candidate" onClick={() => removeCandidate(candidate.id)}>
+                    <Trash2 size="0.8125rem" />
+                  </button>
+                </div>
+                <textarea
+                  style={formStyles.textareaSmall}
+                  value={candidate.text}
+                  onChange={(event) => updateCandidate(candidate.id, { text: event.target.value })}
+                  placeholder="Directive text"
+                />
+                <div style={viewStyles.nodeControls}>
+                  <select
+                    aria-label="Directive resolution"
+                    style={{ ...formStyles.input, maxWidth: "12rem" }}
+                    value={candidate.resolutionMode}
+                    onChange={(event) => updateCandidate(candidate.id, { resolutionMode: event.target.value })}
+                  >
+                    <option value="checklist">Checklist</option>
+                    <option value="accumulation">Accumulation</option>
+                  </select>
+                  {isAccumulation ? (
+                    <input
+                      aria-label="Accumulation target"
+                      min="1"
+                      style={{ ...formStyles.input, maxWidth: "5rem" }}
+                      type="number"
+                      value={candidate.target}
+                      onChange={(event) => updateCandidate(candidate.id, { target: Math.max(1, Number(event.target.value) || 1) })}
+                    />
+                  ) : null}
+                  <span style={{ ...viewStyles.badge, ...viewStyles.badgeMuted }}>{candidate.source}</span>
+                </div>
+              </article>
+            );
+          })}
+          {!draft.candidates?.length ? <div style={viewStyles.empty}>Generate directives to review candidates before adding them.</div> : null}
+        </div>
+
+        <div style={viewStyles.debugActionRow}>
+          <button type="button" style={formStyles.secondaryButton} onClick={onClose}>
+            <X size="0.875rem" />
+            Cancel
+          </button>
+          <button type="button" style={formStyles.primaryButton} onClick={onConfirm} disabled={!selectedCount || generating}>
+            <CheckCircle2 size="0.875rem" />
+            Add Selected
+          </button>
+        </div>
+      </section>
+      {lorebookModalOpen ? (
+        <LorebookSelectModal
+          selectedPointers={contextEntries.map(makeLorebookEntryPointer)}
+          onSelect={onAttachContext}
+          onClose={() => setLorebookModalOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function DeleteNodeDialog({ draft, onCancel, onConfirm }) {
+  const node = draft?.node || {};
+  const childCount = countDirectChildren(node);
+  return (
+    <div style={viewStyles.modalBackdrop}>
+      <section style={viewStyles.modalPanel}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>Remove Milestone</h3>
+            <p style={viewStyles.muted}>This removes the selected milestone or directive from the live goal tree.</p>
+          </div>
+          <button type="button" style={formStyles.iconButton} title="Cancel removal" onClick={onCancel}>
+            <X size="0.875rem" />
+          </button>
+        </div>
+        <div style={viewStyles.empty}>
+          <p style={viewStyles.body}>{getNodeText(node) || "Untitled directive"}</p>
+          {childCount ? (
+            <p style={viewStyles.note}>
+              This directive has {childCount} child directive{childCount === 1 ? "" : "s"}. Removing it may remove that subtree too.
+            </p>
+          ) : null}
+        </div>
+        <div style={viewStyles.debugActionRow}>
+          <button type="button" style={formStyles.secondaryButton} onClick={onCancel}>
+            <X size="0.875rem" />
+            Cancel
+          </button>
+          <button type="button" style={formStyles.primaryButton} onClick={onConfirm}>
+            <Trash2 size="0.875rem" />
+            Remove
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1171,6 +2345,8 @@ function GoalTree({
   hideCompleted,
   onDraftChange,
   onFocusNode,
+  onGenerateDirectives,
+  onRequestDeleteNode,
   onSetCurrentFocus,
   onShowFullTree,
   onUpdateNode,
@@ -1189,7 +2365,7 @@ function GoalTree({
           <h3 style={viewStyles.title}>{goal.name}</h3>
           <p style={viewStyles.muted}>
             {focusedNode
-              ? focusedMatch.path.map((item) => getNodeText(item) || "Untitled").join(" / ")
+              ? getNodePathLabel(focusedMatch.path)
               : `${goal.type} / ${goal.status}${goal.priority ? " / priority" : ""}`}
           </p>
         </div>
@@ -1215,6 +2391,7 @@ function GoalTree({
         <LiveTaskCard
           goal={goal}
           node={focusedNode}
+          onDeleteNode={onRequestDeleteNode}
           onSetCurrentFocus={onSetCurrentFocus}
           onUpdateNode={onUpdateNode}
         />
@@ -1253,6 +2430,7 @@ function GoalTree({
           draft={addDrafts[`${goal.id}:${addParentId || "root"}`] || createLiveNodeDraft()}
           onAdd={() => addChild(goal, addParentId)}
           onChange={(draft) => onDraftChange((current) => ({ ...current, [`${goal.id}:${addParentId || "root"}`]: draft }))}
+          onGenerate={focusedNode ? () => onGenerateDirectives(goal, focusedNode) : null}
           tierLabel={focusedNode ? "directive" : "milestone"}
         />
       </section>
@@ -1260,7 +2438,7 @@ function GoalTree({
   );
 }
 
-function LiveTaskCard({ goal, node, onSetCurrentFocus, onUpdateNode }) {
+function LiveTaskCard({ goal, node, onDeleteNode, onSetCurrentFocus, onUpdateNode }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(() => ({
     text: getNodeText(node),
@@ -1326,7 +2504,6 @@ function LiveTaskCard({ goal, node, onSetCurrentFocus, onUpdateNode }) {
             </span>
           )}
           <span style={viewStyles.subjectText}>
-            <span style={viewStyles.contextText}>{getNodeText(node) || "Untitled milestone"}</span>
             <span style={viewStyles.contextLabel}>{getNodeMode(node)} / {node.state}</span>
           </span>
         </div>
@@ -1340,6 +2517,9 @@ function LiveTaskCard({ goal, node, onSetCurrentFocus, onUpdateNode }) {
               <button type="button" style={formStyles.iconButton} title="Save milestone edits" onClick={saveEditor}>
                 <Save size="0.8125rem" />
               </button>
+              <button type="button" style={formStyles.iconButton} title="Remove directive" onClick={() => onDeleteNode(goal, node)}>
+                <Trash2 size="0.8125rem" />
+              </button>
               <button type="button" style={formStyles.iconButton} title="Cancel milestone edits" onClick={() => setIsEditing(false)}>
                 <X size="0.8125rem" />
               </button>
@@ -1351,6 +2531,8 @@ function LiveTaskCard({ goal, node, onSetCurrentFocus, onUpdateNode }) {
           )}
         </div>
       </div>
+
+      <p style={viewStyles.focusedNodeText}>{getNodeText(node) || "Untitled milestone"}</p>
 
       {isEditing ? (
         <>
@@ -1415,11 +2597,14 @@ function LiveTaskLinkRow({ node, onNavigate }) {
   );
 }
 
-function LiveNodeAddForm({ draft, onAdd, onChange, tierLabel }) {
+function LiveNodeAddForm({ draft, onAdd, onChange, onGenerate, tierLabel }) {
   const isAccumulation = draft.resolutionMode === "accumulation";
   const label = tierLabel || "milestone";
+  const columns = `minmax(0, 1fr) minmax(8rem, 10rem) ${isAccumulation ? "minmax(4rem, 5rem)" : ""} auto ${onGenerate ? "auto" : ""}`
+    .replace(/\s+/g, " ")
+    .trim();
   return (
-    <div style={viewStyles.nodeAddPanel}>
+    <div style={{ ...viewStyles.nodeAddPanel, gridTemplateColumns: columns }}>
       <input
         style={formStyles.input}
         value={draft.text}
@@ -1448,6 +2633,11 @@ function LiveNodeAddForm({ draft, onAdd, onChange, tierLabel }) {
       <button type="button" style={formStyles.iconButton} title={`Add ${label}`} onClick={onAdd}>
         <Plus size="0.8125rem" />
       </button>
+      {onGenerate ? (
+        <button type="button" style={formStyles.iconButton} title="Generate directives" onClick={onGenerate}>
+          <Lightbulb size="0.8125rem" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1589,41 +2779,40 @@ function SetupView({ activeSubject, backendStatus, context, contextStatus, subje
   const [binding, setBinding] = useState(null);
   const [chatBindings, setChatBindings] = useState([]);
   const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [generationMode, setGenerationMode] = useState("directive");
-  const [promptNotes, setPromptNotes] = useState("");
-  const [assembledPrompt, setAssembledPrompt] = useState(() => readStoredString(SETUP_PROMPT_DEBUG_KEY));
-  const [rawOutput, setRawOutput] = useState(() => readStoredString(SETUP_RAW_DEBUG_KEY));
-  const [parsedCandidates, setParsedCandidates] = useState(() => readStoredString(SETUP_PARSED_DEBUG_KEY));
-  const [generationErrors, setGenerationErrors] = useState(() => readStoredString(SETUP_ERROR_DEBUG_KEY));
+  const [selectedPrompt, setSelectedPrompt] = useState(() => readStoredPrompt());
+  const [promptValidation, setPromptValidation] = useState(() => readStoredObject(GOAL_PROMPT_VALIDATION_KEY));
+  const [promptOverrides, setPromptOverrides] = useState(() => readStoredObject(GOAL_PROMPT_OVERRIDES_KEY) || {});
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(() => readStoredBoolean(GOAL_SHOW_PROMPT_KEY));
+  const [showGenerationOutput, setShowGenerationOutput] = useState(() => readStoredBoolean(GOAL_SHOW_GENERATION_OUTPUT_KEY));
   const [status, setStatus] = useState({ loading: false, error: "", message: "" });
-  const [debugRunning, setDebugRunning] = useState(false);
-  const [draftingStatus, setDraftingStatus] = useState(() => randomGoalDraftingStatus());
-  const [draftingPulse, setDraftingPulse] = useState(0);
 
   useEffect(() => {
-    writeStoredString(SETUP_PROMPT_DEBUG_KEY, assembledPrompt);
-  }, [assembledPrompt]);
+    writeStoredPrompt(selectedPrompt);
+  }, [selectedPrompt]);
 
   useEffect(() => {
-    writeStoredString(SETUP_RAW_DEBUG_KEY, rawOutput);
-  }, [rawOutput]);
+    writeStoredObject(GOAL_PROMPT_VALIDATION_KEY, promptValidation);
+  }, [promptValidation]);
 
   useEffect(() => {
-    writeStoredString(SETUP_PARSED_DEBUG_KEY, parsedCandidates);
-  }, [parsedCandidates]);
+    writeStoredObject(GOAL_PROMPT_OVERRIDES_KEY, promptOverrides);
+  }, [promptOverrides]);
 
   useEffect(() => {
-    writeStoredString(SETUP_ERROR_DEBUG_KEY, generationErrors);
-  }, [generationErrors]);
+    writeStoredBoolean(GOAL_SHOW_PROMPT_KEY, showPrompt);
+  }, [showPrompt]);
 
   useEffect(() => {
-    if (!debugRunning) return undefined;
-    const interval = window.setInterval(() => {
-      setDraftingPulse((pulse) => pulse + 1);
-      setDraftingStatus((current) => (Math.random() > 0.68 ? randomGoalDraftingStatus(current) : current));
-    }, 180);
-    return () => window.clearInterval(interval);
-  }, [debugRunning]);
+    writeStoredBoolean(GOAL_SHOW_GENERATION_OUTPUT_KEY, showGenerationOutput);
+  }, [showGenerationOutput]);
+
+  useEffect(() => {
+    if (!selectedPrompt) return;
+    const summary = createPromptContractSummary(selectedPrompt);
+    setPromptValidation(summary);
+    setPromptOverrides((current) => createDefaultOverrides(selectedPrompt, summary, current));
+  }, [selectedPrompt]);
 
   async function loadSetupData() {
     if (!backendStatus.ok || !persona) {
@@ -1664,48 +2853,35 @@ function SetupView({ activeSubject, backendStatus, context, contextStatus, subje
     }
   }
 
-  async function buildDebugPanels() {
-    setDebugRunning(true);
-    setGenerationErrors("");
-    try {
-      await new Promise((resolve) => window.setTimeout(resolve, 350));
-      const prompt = buildGoalDebugPrompt({ activeSubject, context, generationMode, promptNotes });
-      const parsed = parseCandidateLines(rawOutput);
-      setAssembledPrompt(prompt);
-      setParsedCandidates(JSON.stringify(parsed, null, 2));
-      setGenerationErrors(parsed.length || !rawOutput.trim() ? "" : "Raw output did not contain parseable candidate lines.");
-    } catch (error) {
-      setGenerationErrors(error?.message || "Could not build generation debug panels.");
-    } finally {
-      setDebugRunning(false);
-    }
+  function selectDirectivePrompt(prompt) {
+    const summary = createPromptContractSummary(prompt);
+    setSelectedPrompt(prompt);
+    setPromptValidation(summary);
+    setPromptOverrides((current) => createDefaultOverrides(prompt, summary, current));
+    setPromptModalOpen(false);
+    setStatus({
+      loading: false,
+      error: "",
+      message: summary?.valid ? "Directive prompt selected." : "Prompt selected, but milestone is missing.",
+    });
   }
 
-  function renderDraftingStatus() {
-    const statusText = `${draftingStatus}${DRAFTING_ELLIPSIS}`;
-    const pulseIndex = draftingPulse % (statusText.length + 4);
+  function clearDirectivePrompt() {
+    setSelectedPrompt(null);
+    setPromptValidation(null);
+    setPromptOverrides({});
+  }
 
-    return (
-      <span style={viewStyles.draftingStatus}>
-        <span style={viewStyles.draftingStatusText} aria-label={statusText}>
-          {statusText.split("").map((char, index) => (
-            <span
-              aria-hidden="true"
-              key={`${char}-${index}`}
-              style={{
-                ...viewStyles.draftingStatusChar,
-                color: char.trim() ? draftingCharacterColor(index, pulseIndex) : "transparent",
-              }}
-            >
-              {char === " " ? "\u00a0" : char}
-            </span>
-          ))}
-        </span>
-      </span>
-    );
+  function updatePromptOverride(name, value) {
+    setPromptOverrides((current) => ({ ...current, [name]: value }));
   }
 
   const bindingTargets = binding?.targets || [];
+  const cleanupBindings = chatBindings.filter((item) => {
+    const chatId = item.chat_id || item.id || "";
+    return chatId && chatId !== context.chatId;
+  });
+  const overrideRows = makeGoalOverrideRows(selectedPrompt, promptValidation);
 
   return (
     <div style={viewStyles.stack}>
@@ -1750,6 +2926,113 @@ function SetupView({ activeSubject, backendStatus, context, contextStatus, subje
       </section>
 
       <section style={viewStyles.panel}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>Directive Prompt</h3>
+            <p style={viewStyles.muted}>Choose the reusable prompt used when drafting directives under a focused milestone.</p>
+          </div>
+          <button type="button" style={formStyles.primaryButton} onClick={() => setPromptModalOpen(true)}>
+            <ScrollText size="0.9375rem" />
+            {selectedPrompt ? "Choose" : "Choose Prompt"}
+          </button>
+        </div>
+        {selectedPrompt ? (
+          <div style={viewStyles.stack}>
+            <section style={promptPickerStyles.selectedCard}>
+              <div style={viewStyles.stack}>
+                <div style={viewStyles.cardMeta}>
+                  <p style={viewStyles.kicker}>Selected Prompt</p>
+                  <p style={viewStyles.muted}>{selectedPrompt.content_type || "unsorted"}</p>
+                </div>
+                <div style={viewStyles.panelHeader}>
+                  <ScrollText size="1rem" />
+                  <h3 style={viewStyles.title}>{selectedPrompt.name}</h3>
+                </div>
+                <p style={viewStyles.body}>{selectedPrompt.description || "No description."}</p>
+                <p style={viewStyles.muted}>
+                  {selectedPrompt.entries?.length || 0} section{selectedPrompt.entries?.length === 1 ? "" : "s"} |{" "}
+                  {selectedPrompt.requirements?.length || 0} requirement{selectedPrompt.requirements?.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div style={viewStyles.cardToolbar}>
+                <button type="button" style={formStyles.iconButton} title="Clear prompt" onClick={clearDirectivePrompt}>
+                  <Trash2 size="0.875rem" />
+                </button>
+              </div>
+            </section>
+
+            <div style={viewStyles.stack}>
+              <div>
+                <h4 style={viewStyles.title}>Contract</h4>
+                {promptValidation?.valid ? (
+                  <p style={viewStyles.muted}>Ready for directive generation: milestone is available.</p>
+                ) : (
+                  <p style={viewStyles.muted}>
+                    Missing required directive field{promptValidation?.missing_fields?.length === 1 ? "" : "s"}:{" "}
+                    {promptValidation?.missing_fields?.join(", ") || "validation unavailable"}.
+                  </p>
+                )}
+              </div>
+              <div style={viewStyles.badgeRow}>
+                {GOAL_REQUIRED_FIELDS.map((fieldName) => (
+                  <span
+                    key={fieldName}
+                    style={{
+                      ...viewStyles.badge,
+                      ...(promptValidation?.missing_fields?.includes(fieldName) ? viewStyles.badgeMuted : undefined),
+                    }}
+                  >
+                    {fieldName}
+                  </span>
+                ))}
+              </div>
+              {overrideRows.length ? (
+                <div style={viewStyles.scrollStack}>
+                  {overrideRows.map((row) => (
+                    <label key={row.id} style={formStyles.field}>
+                      <span style={formStyles.label}>{row.name}</span>
+                      <span style={formStyles.hint}>{row.required ? "Required" : "Optional"} {row.kind} from {row.sectionName}.</span>
+                      <input
+                        style={formStyles.input}
+                        value={promptOverrides[row.id] ?? ""}
+                        onChange={(event) => updatePromptOverride(row.id, event.target.value)}
+                        placeholder={row.defaultValue || "Override value"}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p style={viewStyles.muted}>No additional prompt fields need defaults.</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={viewStyles.empty}>Directive generation needs a prompt with the milestone field.</div>
+        )}
+      </section>
+
+      <section style={viewStyles.panel}>
+        <div style={viewStyles.panelHeader}>
+          <div>
+            <h3 style={viewStyles.title}>Debug</h3>
+            <p style={viewStyles.muted}>Expose prompt and generation artifacts while tuning directive generation.</p>
+          </div>
+        </div>
+        <div style={viewStyles.stack}>
+          <SwitchField
+            checked={showPrompt}
+            label="Show prompt"
+            onChange={setShowPrompt}
+          />
+          <SwitchField
+            checked={showGenerationOutput}
+            label="Show generation output"
+            onChange={setShowGenerationOutput}
+          />
+        </div>
+      </section>
+
+      <section style={viewStyles.panel}>
         <button
           type="button"
           style={viewStyles.disclosureButtonSmall}
@@ -1759,21 +3042,19 @@ function SetupView({ activeSubject, backendStatus, context, contextStatus, subje
             {cleanupOpen ? <ChevronDown size="0.875rem" /> : <ChevronRight size="0.875rem" />}
             Advanced Chat Cleanup
           </span>
-          <span style={viewStyles.muted}>{chatBindings.length} saved chat binding{chatBindings.length === 1 ? "" : "s"}</span>
+          <span style={viewStyles.muted}>{cleanupBindings.length} stale chat binding{cleanupBindings.length === 1 ? "" : "s"}</span>
         </button>
         {cleanupOpen ? (
           <div style={viewStyles.stack}>
-            <p style={viewStyles.muted}>Delete stale binding entries for the resolved backend persona namespace. This does not delete goals or collections.</p>
-            {chatBindings.length ? (
+            <p style={viewStyles.muted}>Delete stale binding entries for the resolved backend persona namespace. The current chat is hidden here.</p>
+            {cleanupBindings.length ? (
               <div style={viewStyles.scrollStack}>
-                {chatBindings.map((item) => {
+                {cleanupBindings.map((item) => {
                   const chatId = item.chat_id || item.id || "";
                   const targets = item.targets || [];
                   return (
                     <div key={chatId} style={viewStyles.targetRow}>
-                      <span style={{ ...viewStyles.badge, ...(chatId === context.chatId ? null : viewStyles.badgeMuted) }}>
-                        {chatId === context.chatId ? "current" : "saved"}
-                      </span>
+                      <span style={{ ...viewStyles.badge, ...viewStyles.badgeMuted }}>saved</span>
                       <span style={viewStyles.subjectText}>
                         <span style={viewStyles.contextText}>{chatId}</span>
                         <span style={viewStyles.contextLabel}>{targets.length} target{targets.length === 1 ? "" : "s"}</span>
@@ -1786,77 +3067,20 @@ function SetupView({ activeSubject, backendStatus, context, contextStatus, subje
                 })}
               </div>
             ) : (
-              <div style={viewStyles.empty}>No saved chat bindings found for this subject.</div>
+              <div style={viewStyles.empty}>No stale chat bindings found for this subject.</div>
             )}
           </div>
         ) : null}
       </section>
 
-      <section style={viewStyles.panel}>
-        <div style={viewStyles.panelHeader}>
-          <div>
-            <h3 style={viewStyles.title}>Generation Debug</h3>
-            <p style={viewStyles.muted}>Preview prompt context and parse candidate milestones or directives before Phase 7 writes them.</p>
-          </div>
-          {debugRunning ? (
-            <div style={viewStyles.draftingIndicator} role="status" aria-live="polite">
-              <LoaderCircle size="0.9375rem" style={viewStyles.draftingSpinner} />
-              {renderDraftingStatus()}
-            </div>
-          ) : (
-            <button type="button" style={formStyles.primaryButton} onClick={() => void buildDebugPanels()}>
-              <RefreshCw size="0.875rem" />
-              Build Debug
-            </button>
-          )}
-        </div>
-        <div style={viewStyles.fieldGrid}>
-          <label style={formStyles.field}>
-            <span style={formStyles.label}>Generation target</span>
-            <select style={formStyles.input} value={generationMode} onChange={(event) => setGenerationMode(event.target.value)}>
-              <option value="directive">Directive generation</option>
-              <option value="initial">Initial milestones</option>
-            </select>
-          </label>
-          <label style={formStyles.field}>
-            <span style={formStyles.label}>Notes</span>
-            <input
-              style={formStyles.input}
-              value={promptNotes}
-              onChange={(event) => setPromptNotes(event.target.value)}
-              placeholder="Optional prompt/debug notes"
-            />
-          </label>
-        </div>
-        <div style={viewStyles.rawViewer}>
-          <label style={formStyles.field}>
-            <span style={formStyles.label}>Assembled prompt</span>
-            <textarea
-              style={{ ...formStyles.textareaSmall, minHeight: "9rem" }}
-              value={assembledPrompt}
-              onChange={(event) => setAssembledPrompt(event.target.value)}
-            />
-          </label>
-          <label style={formStyles.field}>
-            <span style={formStyles.label}>Raw generation output</span>
-            <textarea
-              style={{ ...formStyles.textareaSmall, minHeight: "7rem" }}
-              value={rawOutput}
-              onChange={(event) => setRawOutput(event.target.value)}
-              placeholder="Paste raw output here to test candidate parsing"
-            />
-          </label>
-          <label style={formStyles.field}>
-            <span style={formStyles.label}>Parsed candidates</span>
-            <pre style={viewStyles.rawOutput}>{parsedCandidates || "No parsed candidates yet."}</pre>
-          </label>
-          <label style={formStyles.field}>
-            <span style={formStyles.label}>Generation errors</span>
-            <pre style={viewStyles.rawOutput}>{generationErrors || "No generation errors captured."}</pre>
-          </label>
-        </div>
-      </section>
-
+      {promptModalOpen ? (
+        <PromptSelectModal
+          selectedPromptId={selectedPrompt?.id}
+          onSelect={selectDirectivePrompt}
+          onClose={() => setPromptModalOpen(false)}
+          requiredFields={GOAL_REQUIRED_FIELDS}
+        />
+      ) : null}
       <StatusSnackbar message={status.error || status.message} />
     </div>
   );

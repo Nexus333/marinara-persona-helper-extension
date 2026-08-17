@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added directive-only Goals generation with prompt contract setup, lorebook context, reviewable draft candidates, regeneration, and debug output panels.
+- Added live Goals milestone removal from edit mode with a confirmation dialog.
+- Moved Goals generation settings into the directive generation modal and removed the obsolete setup-only generation debug builder.
+- Added an explicit chat-history toggle and message-count control to Goals directive generation settings.
+- Improved focused Goals milestone readability by separating wrapped node text from compact breadcrumb metadata.
+- Hid the current chat from Goals Advanced Chat Cleanup so only stale bindings are listed.
+- Updated the Persona Helper topbar compass icon to use the active Marinara primary theme color.
 - Replaced Goals subject dropdown/list selection with searchable card picker modals for current subject and duplicate target subject.
 - Replaced remaining Goals checkbox affordances with switches, tightened selected-card action buttons, and routed Goals status messages through the shared snackbar.
 - Added Goals Library duplication with target subject, target collection, reset progress, and optional current-chat assignment.
